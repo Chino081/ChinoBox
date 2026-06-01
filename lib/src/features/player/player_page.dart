@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../core/network/playback_proxy.dart';
 import '../content/data/content_repository.dart';
 import '../content/domain/content_models.dart';
 import '../source/domain/source_catalog.dart';
@@ -64,10 +65,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _controller = VideoController(_player);
     _positionSub = _player.stream.position.listen((value) => _position = value);
     _durationSub = _player.stream.duration.listen((value) => _duration = value);
-    unawaited(_player.open(Media(
-      widget.playUrl,
-      httpHeaders: widget.playHeaders.isEmpty ? null : widget.playHeaders,
-    )));
+    unawaited(_openMedia());
     unawaited(_saveHistory());
   }
 
@@ -78,6 +76,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     unawaited(_durationSub?.cancel());
     unawaited(_player.dispose());
     super.dispose();
+  }
+
+  Future<void> _openMedia() async {
+    final headers = _effectivePlayHeaders();
+    var playUrl = widget.playUrl;
+    Map<String, String>? mediaHeaders =
+        headers.isEmpty ? null : Map.of(headers);
+
+    if (_shouldProxy(playUrl, headers)) {
+      try {
+        playUrl = await PlaybackProxy.instance.proxiedUrl(playUrl, headers);
+        mediaHeaders = null;
+      } catch (_) {
+        mediaHeaders = headers;
+      }
+    }
+
+    if (!mounted) return;
+    await _player.open(Media(playUrl, httpHeaders: mediaHeaders));
   }
 
   Future<void> _saveHistory() async {
@@ -91,7 +108,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             episodeTitle: widget.episodeTitle,
             episodeUrl: widget.episodeUrl,
             playUrl: widget.playUrl,
-            playHeaders: widget.playHeaders,
+            playHeaders: _effectivePlayHeaders(),
             poster: widget.poster,
             position: _position.inMilliseconds,
             duration: _duration.inMilliseconds,
@@ -128,7 +145,32 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       ),
     );
   }
+
+  Map<String, String> _effectivePlayHeaders() {
+    final headers = Map<String, String>.of(widget.playHeaders);
+    final uri = Uri.tryParse(widget.playUrl);
+    if (widget.sourceId == 'libvio' &&
+        uri != null &&
+        uri.host.toLowerCase().endsWith('vbing.me')) {
+      headers.putIfAbsent('User-Agent', () => _browserUserAgent);
+      headers.putIfAbsent('Referer', () => 'https://www.libvio.run/');
+    }
+    return headers;
+  }
+
+  bool _shouldProxy(String url, Map<String, String> headers) {
+    if (headers.isEmpty) return false;
+    final uri = Uri.tryParse(url);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return false;
+    }
+    return url.toLowerCase().contains('.mp4');
+  }
 }
+
+const _browserUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+    '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 Map<String, String> _decodeHeaders(String value) {
   if (value.isEmpty) return const {};
