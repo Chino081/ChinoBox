@@ -1,5 +1,9 @@
-import 'package:html/dom.dart';
+import 'dart:convert';
 
+import 'package:html/dom.dart';
+import 'package:html/parser.dart' as html_parser;
+
+import '../../../../core/network/movies_http_client.dart';
 import '../../../settings/app_settings.dart';
 import '../../../source/domain/source_catalog.dart';
 import '../../domain/content_models.dart';
@@ -18,6 +22,71 @@ class LibvioParser extends GenericMaccmsParser {
   Map<String, String> requestHeaders(AppSettings settings) => {
         'Referer': '${domain(settings)}/',
       };
+
+  @override
+  Map<String, String> playerHeaders(AppSettings settings) => {
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+        'Referer': '${domain(settings)}/',
+      };
+
+  @override
+  Future<List<PlayItem>> loadPlayItems(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String episodeUrl,
+  ) async {
+    final resolved = episodePageUrl(settings, episodeUrl);
+    final body =
+        await client.getText(resolved, headers: requestHeaders(settings));
+    final direct = parsePlayItems(html_parser.parse(body), settings);
+    if (direct.isNotEmpty) return direct;
+
+    final playerData = _playerDataFromHtml(body);
+    if (playerData == null || playerData.from != 'yd189') return const [];
+
+    final base = domain(settings);
+    final iframeUrl = Uri.parse('$base/vid/yd.php').replace(
+      queryParameters: {
+        'url': playerData.url,
+        if (playerData.linkNext.isNotEmpty) 'next': playerData.linkNext,
+        if (playerData.id.isNotEmpty) 'id': playerData.id,
+        if (playerData.nid.isNotEmpty) 'nid': playerData.nid,
+      },
+    ).toString();
+    final iframeBody = await client.getText(
+      iframeUrl,
+      headers: {
+        ...requestHeaders(settings),
+        'Referer': resolved,
+      },
+    );
+    final parsePath = RegExp(
+      r'''fetch\(\s*['"]([^'"]*parse_yd\.php[^'"]*)['"]\s*,''',
+      caseSensitive: false,
+    ).firstMatch(iframeBody)?.group(1);
+    if (parsePath == null || parsePath.isEmpty) return const [];
+
+    final parseUrl = absolutize(parsePath, base);
+    final jsonBody = await client.getText(parseUrl, headers: const {
+      'Accept': '*/*',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+    });
+    final url = _urlFromParseResponse(jsonBody);
+    if (url == null || url.isEmpty) return const [];
+
+    return [
+      PlayItem(
+        url: url,
+        type: _playTypeFor(url),
+      ),
+    ];
+  }
 
   @override
   MediaDetail parseDetail(Document document, AppSettings settings, String url) {
@@ -91,7 +160,7 @@ class LibvioParser extends GenericMaccmsParser {
       }
     }
 
-    if (groups.isEmpty) {
+    if (groups.isEmpty && !_hasNetdiskOnlyPanels(root)) {
       final playButton = root.querySelector('.play-btn a[href*="/w/"]');
       if (playButton != null) {
         final href = playButton.attributes['href'] ?? '';
@@ -108,6 +177,12 @@ class LibvioParser extends GenericMaccmsParser {
       }
     }
     return groups;
+  }
+
+  bool _hasNetdiskOnlyPanels(Element root) {
+    return root
+            .querySelector('.playlist-panel.netdisk-panel, .netdisk-panel') !=
+        null;
   }
 
   List<EpisodeGroup> _parsePlayPageEpisodeGroups(Element root, String base) {
@@ -163,4 +238,84 @@ class LibvioParser extends GenericMaccmsParser {
     }
     return items;
   }
+
+  _LibvioPlayerData? _playerDataFromHtml(String html) {
+    final playerJson =
+        RegExp(r'player_aaaa\s*=\s*(\{.*?\})\s*;?\s*<', dotAll: true)
+            .firstMatch('$html<')
+            ?.group(1);
+    if (playerJson == null || playerJson.isEmpty) return null;
+
+    Object? decoded;
+    try {
+      decoded = jsonDecode(playerJson);
+    } catch (_) {
+      decoded = null;
+    }
+    if (decoded is! Map<String, dynamic>) return null;
+
+    final encrypt = int.tryParse(decoded['encrypt']?.toString() ?? '') ?? 0;
+    final rawUrl = decoded['url']?.toString() ?? '';
+    final rawNext = decoded['link_next']?.toString() ?? '';
+    final url = _decodeMacPlayerValue(rawUrl, encrypt);
+    final linkNext = rawNext.replaceAll(r'\/', '/');
+    if (url.isEmpty) return null;
+
+    return _LibvioPlayerData(
+      from: decoded['from']?.toString() ?? '',
+      url: url,
+      linkNext: linkNext,
+      id: decoded['id']?.toString() ?? '',
+      nid: decoded['nid']?.toString() ?? '',
+    );
+  }
+
+  String? _urlFromParseResponse(String jsonBody) {
+    Object? decoded;
+    try {
+      decoded = jsonDecode(jsonBody);
+    } catch (_) {
+      decoded = null;
+    }
+    if (decoded is! Map<String, dynamic>) return null;
+    final url = decoded['url']?.toString().replaceAll(r'\/', '/') ?? '';
+    return url.startsWith('http') ? url : null;
+  }
+
+  String _decodeMacPlayerValue(String value, int encrypt) {
+    if (value.isEmpty) return '';
+    final normalized = value.replaceAll(r'\/', '/');
+    try {
+      return switch (encrypt) {
+        1 => Uri.decodeFull(normalized),
+        2 => Uri.decodeFull(utf8.decode(base64Decode(normalized))),
+        _ => normalized,
+      };
+    } catch (_) {
+      return normalized;
+    }
+  }
+
+  PlayType _playTypeFor(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8')) return PlayType.m3u8;
+    if (lower.contains('.mp4')) return PlayType.mp4;
+    return PlayType.other;
+  }
+}
+
+class _LibvioPlayerData {
+  const _LibvioPlayerData({
+    required this.from,
+    required this.url,
+    required this.linkNext,
+    required this.id,
+    required this.nid,
+  });
+
+  final String from;
+  final String url;
+  final String linkNext;
+  final String id;
+  final String nid;
 }

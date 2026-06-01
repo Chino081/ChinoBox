@@ -30,10 +30,10 @@ const sourceCatalog = <MediaSource>[
     name: '樱花动漫',
     kind: SourceKind.anime,
     defaultDomain: 'https://www.iyinghua.cc',
-    info: '当前网页域名已从原项目 .com/.io 迁移到 .cc；搜索有验证码，暂不支持。',
+    info: '当前网页域名已从原项目 .com/.io 迁移到 .cc；搜索首次可能需要验证码。',
     health: SourceHealth.normal,
-    canSearch: false,
-    message: '搜索页需要验证码，Flutter 版不做绕过；首页、分类、详情可用。',
+    canSearch: true,
+    message: '搜索首次可能需要输入站点验证码。',
   ),
   MediaSource(
     id: 'anfuns',
@@ -88,7 +88,7 @@ const sourceCatalog = <MediaSource>[
     defaultDomain: 'https://xl02.com.de',
     info: '质量高，无广告但更新随缘。',
     health: SourceHealth.normal,
-    message: '搜索页可能出现站点验证，Flutter 版不做绕过。',
+    message: '搜索首次可能需要输入站点验证码。',
   ),
   MediaSource(
     id: 'xbyy',
@@ -120,7 +120,7 @@ const sourceCatalog = <MediaSource>[
     releasePage: 'https://girigirilove.top/',
     info: '质量高，无国产动漫。',
     health: SourceHealth.abnormal,
-    message: '首页、分类、详情和公开播放已适配；搜索页可能出现站点验证，Flutter 版不做绕过。',
+    message: '首页、分类、详情和公开播放已适配；搜索首次可能需要输入站点验证码。',
   ),
 ];
 

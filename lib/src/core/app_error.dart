@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 class AppError implements Exception {
   const AppError(this.message, {this.cause});
 
@@ -6,4 +8,15 @@ class AppError implements Exception {
 
   @override
   String toString() => message;
+}
+
+class SearchCaptchaRequired extends AppError {
+  const SearchCaptchaRequired({
+    required this.imageUrl,
+    required this.imageBytes,
+    String message = '请输入验证码后继续搜索',
+  }) : super(message);
+
+  final String imageUrl;
+  final Uint8List imageBytes;
 }

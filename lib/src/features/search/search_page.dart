@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/app_error.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../content/data/content_repository.dart';
@@ -24,6 +25,7 @@ class SearchPage extends ConsumerStatefulWidget {
 
 class _SearchPageState extends ConsumerState<SearchPage> {
   late final TextEditingController _controller;
+  late final TextEditingController _captchaController;
   var _query = '';
   var _page = 1;
   var _items = <MediaItem>[];
@@ -37,6 +39,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery);
+    _captchaController = TextEditingController();
     _query = widget.initialQuery.trim();
     if (_query.isNotEmpty) _search(reset: true);
   }
@@ -44,26 +47,33 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _captchaController.dispose();
     super.dispose();
   }
 
-  void _search({required bool reset}) {
+  void _search({required bool reset, String? verificationCode}) {
     final query = _controller.text.trim();
     if (query.isEmpty) return;
+    if (verificationCode == null) {
+      _captchaController.clear();
+    }
     setState(() {
       _query = query;
-      _future = _load(reset: reset);
+      _future = _load(reset: reset, verificationCode: verificationCode);
     });
   }
 
-  Future<List<MediaItem>> _load({required bool reset}) async {
+  Future<List<MediaItem>> _load({
+    required bool reset,
+    String? verificationCode,
+  }) async {
     if (reset) {
       _page = 1;
       _items = [];
     }
     final data = await ref
         .read(contentRepositoryProvider)
-        .search(_sourceId, _query, _page);
+        .search(_sourceId, _query, _page, verificationCode: verificationCode);
     if (reset) {
       _items = data;
     } else {
@@ -108,6 +118,22 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                         return const Center(child: CircularProgressIndicator());
                       }
                       if (snapshot.hasError) {
+                        final error = snapshot.error;
+                        if (error is SearchCaptchaRequired) {
+                          return _CaptchaView(
+                            challenge: error,
+                            controller: _captchaController,
+                            onSubmit: () {
+                              final code = _captchaController.text.trim();
+                              if (code.isEmpty) return;
+                              _search(
+                                reset: _items.isEmpty,
+                                verificationCode: code,
+                              );
+                            },
+                            onRefresh: () => _search(reset: _items.isEmpty),
+                          );
+                        }
                         return _ErrorView(
                           message: snapshot.error.toString(),
                           onRetry: () => _search(reset: _items.isEmpty),
@@ -178,6 +204,102 @@ class _ResultList extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (context, index) =>
           PosterCard(item: items[index], sourceId: sourceId),
+    );
+  }
+}
+
+class _CaptchaView extends StatelessWidget {
+  const _CaptchaView({
+    required this.challenge,
+    required this.controller,
+    required this.onSubmit,
+    required this.onRefresh,
+  });
+
+  final SearchCaptchaRequired challenge;
+  final TextEditingController controller;
+  final VoidCallback onSubmit;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(Icons.verified_user_outlined, size: 36),
+              const SizedBox(height: 12),
+              Text(
+                challenge.message,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Image.memory(
+                      challenge.imageBytes,
+                      height: 48,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const SizedBox(
+                        height: 48,
+                        child: Center(child: Text('验证码加载失败')),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                decoration: const InputDecoration(
+                  labelText: '验证码',
+                  prefixIcon: Icon(Icons.password_rounded),
+                ),
+                onSubmitted: (_) => onSubmit(),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onRefresh,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('换一张'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onSubmit,
+                      icon: const Icon(Icons.arrow_forward_rounded),
+                      label: const Text('继续搜索'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

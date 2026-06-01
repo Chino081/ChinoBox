@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +11,9 @@ import '../content/domain/content_models.dart';
 import '../source/domain/source_catalog.dart';
 
 class LibraryPage extends ConsumerStatefulWidget {
-  const LibraryPage({super.key});
+  const LibraryPage({required this.isActive, super.key});
+
+  final bool isActive;
 
   @override
   ConsumerState<LibraryPage> createState() => _LibraryPageState();
@@ -29,6 +33,14 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   }
 
   @override
+  void didUpdateWidget(covariant LibraryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      setState(_reload);
+    }
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
@@ -40,11 +52,22 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     _history = repo.history();
   }
 
+  void _refresh() {
+    setState(_reload);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('收藏历史'),
+        actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -149,6 +172,9 @@ class _HistoryTile extends StatelessWidget {
           'episodeTitle': item.episodeTitle,
           'episodeUrl': item.episodeUrl,
           'playUrl': item.playUrl,
+          if (item.playHeaders.isNotEmpty)
+            'playHeaders':
+                base64Url.encode(utf8.encode(jsonEncode(item.playHeaders))),
         })),
       ),
     );

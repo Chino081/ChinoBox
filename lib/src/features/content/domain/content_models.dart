@@ -196,6 +196,7 @@ class HistoryEntry {
     required this.episodeTitle,
     required this.episodeUrl,
     required this.playUrl,
+    this.playHeaders = const {},
     this.poster = '',
     this.position = 0,
     this.duration = 0,
@@ -211,6 +212,8 @@ class HistoryEntry {
       episodeTitle: json['episodeTitle'] as String? ?? '',
       episodeUrl: json['episodeUrl'] as String? ?? '',
       playUrl: json['playUrl'] as String? ?? '',
+      playHeaders:
+          Map<String, String>.from(json['playHeaders'] as Map? ?? const {}),
       poster: json['poster'] as String? ?? '',
       position: json['position'] as int? ?? 0,
       duration: json['duration'] as int? ?? 0,
@@ -225,6 +228,7 @@ class HistoryEntry {
   final String episodeTitle;
   final String episodeUrl;
   final String playUrl;
+  final Map<String, String> playHeaders;
   final String poster;
   final int position;
   final int duration;
@@ -239,6 +243,7 @@ class HistoryEntry {
       'episodeTitle': episodeTitle,
       'episodeUrl': episodeUrl,
       'playUrl': playUrl,
+      'playHeaders': playHeaders,
       'poster': poster,
       'position': position,
       'duration': duration,

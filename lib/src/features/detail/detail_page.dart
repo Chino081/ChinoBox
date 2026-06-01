@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -354,6 +356,8 @@ class _EpisodeGroupView extends ConsumerWidget {
       'episodeTitle': episode.title,
       'episodeUrl': episode.url,
       'playUrl': play.url,
+      if (play.headers.isNotEmpty)
+        'playHeaders': base64Url.encode(utf8.encode(jsonEncode(play.headers))),
     });
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ class PlayerPage extends ConsumerStatefulWidget {
     required this.episodeTitle,
     required this.episodeUrl,
     required this.playUrl,
+    required this.playHeaders,
     super.key,
   });
 
@@ -30,6 +32,7 @@ class PlayerPage extends ConsumerStatefulWidget {
       episodeTitle: params['episodeTitle'] ?? '',
       episodeUrl: params['episodeUrl'] ?? '',
       playUrl: params['playUrl'] ?? '',
+      playHeaders: _decodeHeaders(params['playHeaders'] ?? ''),
     );
   }
 
@@ -40,6 +43,7 @@ class PlayerPage extends ConsumerStatefulWidget {
   final String episodeTitle;
   final String episodeUrl;
   final String playUrl;
+  final Map<String, String> playHeaders;
 
   @override
   ConsumerState<PlayerPage> createState() => _PlayerPageState();
@@ -60,7 +64,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _controller = VideoController(_player);
     _positionSub = _player.stream.position.listen((value) => _position = value);
     _durationSub = _player.stream.duration.listen((value) => _duration = value);
-    unawaited(_player.open(Media(widget.playUrl)));
+    unawaited(_player.open(Media(
+      widget.playUrl,
+      httpHeaders: widget.playHeaders.isEmpty ? null : widget.playHeaders,
+    )));
+    unawaited(_saveHistory());
   }
 
   @override
@@ -83,6 +91,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             episodeTitle: widget.episodeTitle,
             episodeUrl: widget.episodeUrl,
             playUrl: widget.playUrl,
+            playHeaders: widget.playHeaders,
             poster: widget.poster,
             position: _position.inMilliseconds,
             duration: _duration.inMilliseconds,
@@ -118,5 +127,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         ),
       ),
     );
+  }
+}
+
+Map<String, String> _decodeHeaders(String value) {
+  if (value.isEmpty) return const {};
+  try {
+    final decoded = jsonDecode(utf8.decode(base64Url.decode(value)))
+        as Map<String, dynamic>;
+    return decoded.map((key, value) => MapEntry(key, value.toString()));
+  } catch (_) {
+    return const {};
   }
 }

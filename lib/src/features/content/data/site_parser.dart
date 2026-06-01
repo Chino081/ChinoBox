@@ -33,7 +33,34 @@ abstract class SiteParser {
 
   String searchUrl(AppSettings settings, String query, int page);
 
+  String verifiedSearchUrl(
+    AppSettings settings,
+    String query,
+    int page,
+    String code,
+  ) {
+    return searchUrl(settings, query, page);
+  }
+
+  Future<String?> loadVerifiedSearchBody(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String query,
+    int page,
+    String code,
+  ) async {
+    return null;
+  }
+
   String categoryUrl(AppSettings settings, String path, int page);
+
+  String? searchCaptchaImageUrl(
+    Document document,
+    AppSettings settings,
+    String responseUrl,
+  ) {
+    return null;
+  }
 
   String detailPageUrl(AppSettings settings, String url) {
     return absolutize(url, domain(settings));

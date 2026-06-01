@@ -19,10 +19,10 @@ class _HomeShellPageState extends State<HomeShellPage> {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: const [
-          HomePage(),
-          LibraryPage(),
-          SettingsPage(),
+        children: [
+          const HomePage(),
+          LibraryPage(isActive: _index == 1),
+          const SettingsPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(

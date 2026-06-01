@@ -1,5 +1,6 @@
 import 'package:html/dom.dart';
 
+import '../../../../core/network/movies_http_client.dart';
 import '../../../settings/app_settings.dart';
 import '../../../source/domain/source_catalog.dart';
 import '../../domain/content_models.dart';
@@ -19,6 +20,47 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
         'Origin': domain(settings),
         'Referer': '${domain(settings)}/',
       };
+
+  @override
+  String? searchCaptchaImageUrl(
+    Document document,
+    AppSettings settings,
+    String responseUrl,
+  ) {
+    final root = _root(document);
+    final input = root.querySelector('input[name="verify"], .ds-verify');
+    final image = root.querySelector('img.ds-verify-img, img[src*="/verify/"]');
+    if (input == null || image == null) return null;
+    final src = image.attributes['src'] ?? '';
+    if (src.isEmpty) return null;
+    return absolutize(src, domain(settings));
+  }
+
+  @override
+  Future<String?> loadVerifiedSearchBody(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String query,
+    int page,
+    String code,
+  ) async {
+    final search = searchUrl(settings, query, page);
+    final verifyUrl = Uri.parse(domain(settings)).replace(
+      path: '/index.php/ajax/verify_check',
+      queryParameters: {
+        'type': 'search',
+        'verify': code,
+      },
+    ).toString();
+    final headers = {
+      ...requestHeaders(settings),
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Referer': search,
+      'X-Requested-With': 'XMLHttpRequest',
+    };
+    await client.postForm(verifyUrl, const {}, headers: headers);
+    return client.getText(search, headers: requestHeaders(settings));
+  }
 
   @override
   List<CategoryGroup> get categories => const [

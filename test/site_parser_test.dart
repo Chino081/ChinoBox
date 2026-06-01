@@ -1,8 +1,11 @@
+import 'package:chinobox/src/core/network/movies_http_client.dart';
 import 'package:chinobox/src/features/content/data/parsers/girigirilove_parser.dart';
+import 'package:chinobox/src/features/content/data/parsers/iyinghua_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/libvio_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/tbys_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/yjys_parser.dart';
 import 'package:chinobox/src/features/content/data/site_parser.dart';
+import 'package:chinobox/src/features/content/domain/content_models.dart';
 import 'package:chinobox/src/features/settings/app_settings.dart';
 import 'package:chinobox/src/features/source/domain/source_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -120,6 +123,24 @@ void main() {
       expect(detail.groups.single.title, '繁中');
       expect(detail.groups.single.episodes, hasLength(2));
     });
+
+    test('detects search verification challenge', () {
+      final parser = GiriGiriLoveParser();
+      final settings = AppSettings.defaults();
+      final imageUrl = parser.searchCaptchaImageUrl(
+        html_parser.parse('''
+          <div class="msg-jump">
+            <input name="verify" class="ds-verify">
+            <img class="ds-verify-img" src="/verify/index.html">
+            <button class="verify-submit" data-type="search">提交验证</button>
+          </div>
+        '''),
+        settings,
+        'https://ani.girigirilove.com/search/%E7%81%AB----------1---/',
+      );
+
+      expect(imageUrl, 'https://ani.girigirilove.com/verify/index.html');
+    });
   });
 
   group('LibvioParser', () {
@@ -160,6 +181,102 @@ void main() {
       expect(detail.groups.single.title, 'BD5播放');
       expect(detail.groups.single.episodes, hasLength(2));
     });
+
+    test('attaches playback headers to direct video urls', () {
+      final parser = LibvioParser();
+      final items = parser.parsePlayItems(
+        html_parser.parse('''
+          <script>
+          player_aaaa={"encrypt":3,
+            "url":"https:\\/\\/v.example.com\\/video.mp4"};
+          </script>
+        '''),
+        AppSettings.defaults(),
+      );
+
+      expect(items, hasLength(1));
+      expect(items.first.url, 'https://v.example.com/video.mp4');
+      expect(items.first.headers['Referer'], 'https://www.libvio.run/');
+      expect(items.first.headers.containsKey('Origin'), isFalse);
+    });
+
+    test('resolves yd189 iframe play urls', () async {
+      final parser = LibvioParser();
+      final settings = AppSettings.defaults();
+      final episodeUrl = 'https://www.libvio.run/w/1-4-1.html';
+      final iframeUrl = Uri.parse('https://www.libvio.run/vid/yd.php').replace(
+        queryParameters: {
+          'url': 'encrypted-token',
+          'next': '/w/1-4-2.html',
+          'id': '1',
+          'nid': '1',
+        },
+      ).toString();
+      const parseUrl = 'https://www.libvio.run/vid/parse_yd.php?token=ok';
+      final client = _FakeMoviesHttpClient({
+        episodeUrl: '''
+          <script>
+          var player_aaaa = {"encrypt":3,"url":"encrypted-token",
+            "link_next":"\\/w\\/1-4-2.html","from":"yd189",
+            "id":"1","nid":1};
+          </script>
+        ''',
+        iframeUrl: '''
+          <script>
+          fetch('/vid/parse_yd.php?token=ok', {cache:'no-store'})
+          </script>
+        ''',
+        parseUrl: '{"url":"https:\\/\\/cdn.example.com\\/video.mp4"}',
+      });
+
+      final items = await parser.loadPlayItems(client, settings, episodeUrl);
+
+      expect(items, hasLength(1));
+      expect(items.single.url, 'https://cdn.example.com/video.mp4');
+      expect(items.single.type, PlayType.mp4);
+      final parseRequest =
+          client.requests.singleWhere((request) => request.url == parseUrl);
+      expect(parseRequest.headers.containsKey('Referer'), isFalse);
+    });
+
+    test('does not expose netdisk-only play button as episode', () {
+      final parser = LibvioParser();
+      final detail = parser.parseDetail(
+        html_parser.parse('''
+          <h1>吞噬星空</h1>
+          <div class="play-btn"><a href="/w/7876-1-1.html">立即播放</a></div>
+          <div class="playlist-panel netdisk-panel">
+            <div class="panel-head"><h3>视频下载</h3></div>
+            <a href="https://pan.quark.cn/s/xxx">夸克网盘</a>
+          </div>
+        '''),
+        AppSettings.defaults(),
+        '/detail/7876.html',
+      );
+
+      expect(detail.groups, isEmpty);
+    });
+  });
+
+  group('IYingHuaParser', () {
+    test('detects search verification challenge', () {
+      final parser = IYingHuaParser();
+      final settings = AppSettings.defaults();
+      final imageUrl = parser.searchCaptchaImageUrl(
+        html_parser.parse('''
+          <form id="f_login">
+            <img id="vdimgck" src="include/vdimgck.php">
+            <input name="validate" id="vdcode">
+            <input type="hidden" name="searchword" value="火">
+          </form>
+        '''),
+        settings,
+        'https://www.iyinghua.cc/search.php?searchword=%E7%81%AB',
+      );
+
+      expect(imageUrl, 'https://www.iyinghua.cc/include/vdimgck.php');
+      expect(sourceById('iyinghua').canSearch, isTrue);
+    });
   });
 
   group('YjysParser', () {
@@ -187,6 +304,45 @@ void main() {
       expect(detail.groups, hasLength(1));
       expect(detail.groups.single.title, '在线播放');
       expect(detail.groups.single.episodes, hasLength(2));
+    });
+
+    test('builds current category and captcha urls', () {
+      final parser = YjysParser();
+      final settings = AppSettings.defaults();
+      final optionTitles = parser.categories
+          .expand((group) => group.options)
+          .map((option) => option.title);
+
+      expect(optionTitles, containsAll(['电影', '剧集', '动漫', '综艺', '国产剧']));
+      expect(
+        parser.categoryUrl(settings, '/s/all?type=0', 1),
+        'https://xl02.com.de/s/all?type=0',
+      );
+      expect(
+        parser.categoryUrl(settings, '/s/all?type=0', 2),
+        'https://xl02.com.de/s/all/2?type=0',
+      );
+      expect(
+        parser.categoryUrl(settings, '/s/donghua', 2),
+        'https://xl02.com.de/s/donghua/2',
+      );
+      expect(
+        parser.verifiedSearchUrl(settings, '哈', 1, '1234'),
+        'https://xl02.com.de/search/%E5%93%88/1?code=1234',
+      );
+      expect(
+        parser.searchCaptchaImageUrl(
+          html_parser.parse('''
+            <div class="xl-code-wrap">
+              <img id="verifyCode" src="/search/verifyCode?t=1">
+              <input id="code" type="text">
+            </div>
+          '''),
+          settings,
+          'https://xl02.com.de/search/%E5%93%88/1',
+        ),
+        'https://xl02.com.de/search/verifyCode?t=1',
+      );
     });
   });
 
@@ -223,4 +379,31 @@ void main() {
     expect(direct, hasLength(1));
     expect(direct.first.url, 'https://v.example.com/video.mp4');
   });
+}
+
+class _FakeMoviesHttpClient extends MoviesHttpClient {
+  _FakeMoviesHttpClient(this.responses) : super(AppSettings.defaults());
+
+  final Map<String, String> responses;
+  final requests = <_FakeRequest>[];
+
+  @override
+  Future<String> getText(
+    String url, {
+    Map<String, String> headers = const {},
+  }) async {
+    requests.add(_FakeRequest(url, headers));
+    final body = responses[url];
+    if (body == null) {
+      throw StateError('Unexpected request: $url');
+    }
+    return body;
+  }
+}
+
+class _FakeRequest {
+  const _FakeRequest(this.url, this.headers);
+
+  final String url;
+  final Map<String, String> headers;
 }

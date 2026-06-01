@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
@@ -31,10 +32,31 @@ class MoviesHttpClient {
     _dio.httpClientAdapter = IOHttpClientAdapter(
       createHttpClient: () => _createClient(proxy),
     );
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          final cookie = _cookieHeader(options.uri);
+          if (cookie.isNotEmpty) {
+            final existing =
+                options.headers[HttpHeaders.cookieHeader]?.toString() ?? '';
+            options.headers[HttpHeaders.cookieHeader] = [
+              if (existing.isNotEmpty) existing,
+              cookie,
+            ].join('; ');
+          }
+          handler.next(options);
+        },
+        onResponse: (response, handler) {
+          _storeCookies(response);
+          handler.next(response);
+        },
+      ),
+    );
   }
 
   late final Dio _dio;
   final AppSettings settings;
+  final _cookiesByHost = <String, Map<String, Cookie>>{};
 
   Future<String> getText(
     String url, {
@@ -42,6 +64,34 @@ class MoviesHttpClient {
   }) async {
     return _requestText(
         () => _dio.get<String>(url, options: _options(headers)));
+  }
+
+  Future<Uint8List> getBytes(
+    String url, {
+    Map<String, String> headers = const {},
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final response = await _dio.get<List<int>>(
+          url,
+          options: _options(headers, responseType: ResponseType.bytes),
+        );
+        final statusCode = response.statusCode ?? 0;
+        if (statusCode >= 200 && statusCode < 400) {
+          return Uint8List.fromList(response.data ?? const []);
+        }
+        throw AppError('服务器返回 $statusCode');
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await Future<void>.delayed(
+              Duration(milliseconds: 300 * (attempt + 1)));
+        }
+      }
+    }
+    AppLogger.warn('网络请求失败：${lastError.runtimeType}');
+    throw AppError('网络请求失败，请检查网络或代理设置', cause: lastError);
   }
 
   Future<String> postForm(
@@ -64,10 +114,12 @@ class MoviesHttpClient {
   Options _options(
     Map<String, String> headers, {
     String? contentType,
+    ResponseType? responseType,
   }) {
     return Options(
       headers: headers.isEmpty ? null : headers,
       contentType: contentType,
+      responseType: responseType,
     );
   }
 
@@ -129,6 +181,36 @@ class MoviesHttpClient {
       };
     }
     return client;
+  }
+
+  String _cookieHeader(Uri uri) {
+    final values = <String>[];
+    for (final entry in _cookiesByHost.entries) {
+      if (uri.host == entry.key || uri.host.endsWith('.${entry.key}')) {
+        values.addAll(entry.value.values.map((cookie) {
+          return '${cookie.name}=${cookie.value}';
+        }));
+      }
+    }
+    return values.join('; ');
+  }
+
+  void _storeCookies(Response<dynamic> response) {
+    final values = response.headers[HttpHeaders.setCookieHeader];
+    if (values == null || values.isEmpty) return;
+    final fallbackHost = response.realUri.host;
+    for (final value in values) {
+      Cookie cookie;
+      try {
+        cookie = Cookie.fromSetCookieValue(value);
+      } catch (_) {
+        continue;
+      }
+      final host = (cookie.domain?.trim().isNotEmpty ?? false)
+          ? cookie.domain!.replaceFirst(RegExp(r'^\.'), '')
+          : fallbackHost;
+      _cookiesByHost.putIfAbsent(host, () => {})[cookie.name] = cookie;
+    }
   }
 }
 

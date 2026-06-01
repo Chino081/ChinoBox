@@ -58,7 +58,11 @@ class ContentRepository {
   }
 
   Future<List<MediaItem>> search(
-      String sourceId, String query, int page) async {
+    String sourceId,
+    String query,
+    int page, {
+    String? verificationCode,
+  }) async {
     final parser = parserFor(sourceId);
     if (!parser.source.canSearch) {
       throw AppError('当前站点不支持搜索');
@@ -67,8 +71,44 @@ class ContentRepository {
       throw AppError(
           parser.source.message.isEmpty ? '当前站点不可用' : parser.source.message);
     }
-    final body = await _fetch(parser.searchUrl(settings, query, page), parser);
-    return parser.parseList(html_parser.parse(body), settings);
+    final code = verificationCode?.trim() ?? '';
+    final rawSearchUrl = parser.searchUrl(settings, query, page);
+    var url = rawSearchUrl;
+    String body;
+    if (code.isEmpty) {
+      body = await _fetch(url, parser, useCache: false);
+    } else {
+      final verifiedBody = await parser.loadVerifiedSearchBody(
+        client,
+        settings,
+        query,
+        page,
+        code,
+      );
+      if (verifiedBody != null) {
+        body = verifiedBody;
+      } else {
+        url = parser.verifiedSearchUrl(settings, query, page, code);
+        body = await _fetch(url, parser, useCache: false);
+      }
+    }
+    final document = html_parser.parse(body);
+    final captchaUrl = parser.searchCaptchaImageUrl(document, settings, url);
+    if (captchaUrl != null) {
+      final imageBytes = await client.getBytes(
+        captchaUrl,
+        headers: {
+          ...parser.requestHeaders(settings),
+          'Referer': url,
+        },
+      );
+      throw SearchCaptchaRequired(
+        imageUrl: captchaUrl,
+        imageBytes: imageBytes,
+        message: code.isEmpty ? '请输入验证码后继续搜索' : '验证码不正确，请重新输入',
+      );
+    }
+    return parser.parseList(document, settings);
   }
 
   Future<List<MediaItem>> browse(String sourceId, String path, int page) async {
@@ -155,16 +195,17 @@ class ContentRepository {
     String url,
     SiteParser parser, {
     Duration maxAge = const Duration(hours: 1),
+    bool useCache = true,
   }) async {
     if (url.isEmpty) throw AppError('访问地址为空');
     final key = base64Url.encode(utf8.encode(url));
-    if (settings.cacheEnabled) {
+    if (useCache && settings.cacheEnabled) {
       final cached = await store.readCache(key, maxAge);
       if (cached != null) return cached;
     }
     final body =
         await client.getText(url, headers: parser.requestHeaders(settings));
-    if (settings.cacheEnabled && body.isNotEmpty) {
+    if (useCache && settings.cacheEnabled && body.isNotEmpty) {
       await store.writeCache(key, body);
     }
     return body;

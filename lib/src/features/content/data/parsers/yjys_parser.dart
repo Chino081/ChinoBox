@@ -22,9 +22,39 @@ class YjysParser extends SiteParser {
           title: '频道',
           options: [
             CategoryOption(title: '全部', path: '/s/all'),
-            CategoryOption(title: '电影', path: '/s/dianying'),
-            CategoryOption(title: '剧集', path: '/s/dianshiju'),
-            CategoryOption(title: '动漫', path: '/s/dongman'),
+            CategoryOption(title: '电影', path: '/s/all?type=0'),
+            CategoryOption(title: '剧集', path: '/s/all?type=1'),
+            CategoryOption(title: '动漫', path: '/s/donghua'),
+            CategoryOption(title: '综艺', path: '/s/zongyi'),
+          ],
+        ),
+        CategoryGroup(
+          title: '电影类型',
+          options: [
+            CategoryOption(title: '动作', path: '/s/dongzuo'),
+            CategoryOption(title: '爱情', path: '/s/aiqing'),
+            CategoryOption(title: '喜剧', path: '/s/xiju'),
+            CategoryOption(title: '科幻', path: '/s/kehuan'),
+            CategoryOption(title: '恐怖', path: '/s/kongbu'),
+            CategoryOption(title: '战争', path: '/s/zhanzheng'),
+            CategoryOption(title: '剧情', path: '/s/juqing'),
+            CategoryOption(title: '动画', path: '/s/donghua'),
+            CategoryOption(title: '悬疑', path: '/s/xuanyi'),
+            CategoryOption(title: '犯罪', path: '/s/fanzui'),
+            CategoryOption(title: '纪录', path: '/s/jilu'),
+          ],
+        ),
+        CategoryGroup(
+          title: '剧集地区',
+          options: [
+            CategoryOption(title: '国产剧', path: '/s/guoju'),
+            CategoryOption(title: '美剧', path: '/s/meiju'),
+            CategoryOption(title: '韩剧', path: '/s/hanju'),
+            CategoryOption(title: '日剧', path: '/s/riju'),
+            CategoryOption(title: '英剧', path: '/s/yingju'),
+            CategoryOption(title: '港台剧', path: '/s/gangtaiju'),
+            CategoryOption(title: '泰剧', path: '/s/taiju'),
+            CategoryOption(title: '短剧', path: '/s/duanju'),
           ],
         ),
       ];
@@ -35,8 +65,38 @@ class YjysParser extends SiteParser {
   }
 
   @override
+  String verifiedSearchUrl(
+    AppSettings settings,
+    String query,
+    int page,
+    String code,
+  ) {
+    final uri = Uri.parse(searchUrl(settings, query, page));
+    return uri.replace(queryParameters: {'code': code}).toString();
+  }
+
+  @override
   String categoryUrl(AppSettings settings, String path, int page) {
-    return '${domain(settings)}$path/$page';
+    final uri = Uri.parse(path);
+    if (page <= 1) {
+      return absolutize(uri.toString(), domain(settings));
+    }
+    final trimmedPath = uri.path.replaceFirst(RegExp(r'/$'), '');
+    final paged = uri.replace(path: '$trimmedPath/$page');
+    return absolutize(paged.toString(), domain(settings));
+  }
+
+  @override
+  String? searchCaptchaImageUrl(
+    Document document,
+    AppSettings settings,
+    String responseUrl,
+  ) {
+    final root = document.body ?? document.documentElement;
+    if (root == null || root.querySelector('#code') == null) return null;
+    final src = root.querySelector('#verifyCode')?.attributes['src'] ?? '';
+    if (src.isEmpty) return null;
+    return absolutize(src, domain(settings));
   }
 
   @override

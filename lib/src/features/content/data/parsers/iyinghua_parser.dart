@@ -1,5 +1,6 @@
 import 'package:html/dom.dart';
 
+import '../../../../core/network/movies_http_client.dart';
 import '../../../settings/app_settings.dart';
 import '../../../source/domain/source_catalog.dart';
 import '../../domain/content_models.dart';
@@ -27,6 +28,47 @@ class IYingHuaParser extends GenericMaccmsParser {
           ],
         ),
       ];
+
+  @override
+  String? searchCaptchaImageUrl(
+    Document document,
+    AppSettings settings,
+    String responseUrl,
+  ) {
+    final root = document.body ?? document.documentElement;
+    if (root == null || root.querySelector('#vdcode') == null) return null;
+    final src = root.querySelector('#vdimgck')?.attributes['src'] ?? '';
+    if (src.isEmpty) return null;
+    return absolutize(src, domain(settings));
+  }
+
+  @override
+  Future<String?> loadVerifiedSearchBody(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String query,
+    int page,
+    String code,
+  ) {
+    final search = searchUrl(settings, query, page);
+    final action = Uri.parse(search)
+        .resolve(
+          '?scheckAC=check&page=&searchtype=&order=&tid=&area=&year=&letter=&yuyan=&state=&money=&ver=&jq=',
+        )
+        .toString();
+    return client.postForm(
+      action,
+      {
+        'validate': code,
+        'searchword': query,
+      },
+      headers: {
+        ...requestHeaders(settings),
+        'Origin': domain(settings),
+        'Referer': search,
+      },
+    );
+  }
 
   @override
   String categoryUrl(AppSettings settings, String path, int page) {
