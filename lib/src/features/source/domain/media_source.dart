@@ -15,6 +15,7 @@ class MediaSource {
     this.canSearch = true,
     this.rssPath = '',
     this.message = '',
+    this.visible = true,
   });
 
   final String id;
@@ -28,9 +29,11 @@ class MediaSource {
   final bool canSearch;
   final String rssPath;
   final String message;
+  final bool visible;
 
   bool get isAvailable => health != SourceHealth.shutdown;
   bool get isMaintained => health != SourceHealth.noLongerUpdated;
+  bool get isSelectable => visible && isAvailable;
   bool get hasReleasePage => releasePage.isNotEmpty;
   bool get hasRss => rssPath.isNotEmpty;
 

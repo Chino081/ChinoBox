@@ -1,5 +1,7 @@
 import 'media_source.dart';
 
+const defaultSourceId = 'libvio';
+
 const sourceCatalog = <MediaSource>[
   MediaSource(
     id: 'tbys',
@@ -43,6 +45,7 @@ const sourceCatalog = <MediaSource>[
     health: SourceHealth.shutdown,
     canSearch: false,
     message: '站点已关闭，保留结构但不发起请求。',
+    visible: false,
   ),
   MediaSource(
     id: 'libvio',
@@ -63,6 +66,7 @@ const sourceCatalog = <MediaSource>[
     releasePage: 'https://zxzj.app',
     info: '热门电影/电视剧，无广告，可能存在域名变更或安全检测。',
     health: SourceHealth.normal,
+    visible: false,
   ),
   MediaSource(
     id: 'five_movie',
@@ -74,6 +78,7 @@ const sourceCatalog = <MediaSource>[
     info: '原项目标注经常更换域名、出现 Cloudflare，失效后不再维护。',
     health: SourceHealth.noLongerUpdated,
     message: '不再维护，Flutter 版仅保留入口。',
+    visible: false,
   ),
   MediaSource(
     id: 'yjys',
@@ -82,8 +87,8 @@ const sourceCatalog = <MediaSource>[
     kind: SourceKind.movies,
     defaultDomain: 'https://xl02.com.de',
     info: '质量高，无广告但更新随缘。',
-    health: SourceHealth.abnormal,
-    message: '原项目标注搜索和部分接口存在验证，Flutter 版不实现绕过验证。',
+    health: SourceHealth.normal,
+    message: '搜索页可能出现站点验证，Flutter 版不做绕过。',
   ),
   MediaSource(
     id: 'xbyy',
@@ -93,6 +98,7 @@ const sourceCatalog = <MediaSource>[
     defaultDomain: 'https://xiaoxintv.cc',
     info: '质量不错，原项目标注可能需要代理。',
     health: SourceHealth.abnormal,
+    visible: false,
   ),
   MediaSource(
     id: 'nyyy',
@@ -103,6 +109,7 @@ const sourceCatalog = <MediaSource>[
     info: '质量不错，请勿相信视频中的博彩广告。',
     health: SourceHealth.abnormal,
     message: '原项目标注搜索偶尔存在服务器验证或返回空数据。',
+    visible: false,
   ),
   MediaSource(
     id: 'girigirilove',
@@ -117,9 +124,15 @@ const sourceCatalog = <MediaSource>[
   ),
 ];
 
+List<MediaSource> visibleSourceCatalog() {
+  return sourceCatalog.where((source) => source.visible).toList();
+}
+
 MediaSource sourceById(String id) {
   return sourceCatalog.firstWhere(
     (source) => source.id == id,
-    orElse: () => sourceCatalog.firstWhere((source) => source.id == 'zxzj'),
+    orElse: () => sourceCatalog.firstWhere(
+      (source) => source.id == defaultSourceId,
+    ),
   );
 }

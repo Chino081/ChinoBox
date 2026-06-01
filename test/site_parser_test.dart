@@ -1,7 +1,10 @@
 import 'package:chinobox/src/features/content/data/parsers/girigirilove_parser.dart';
+import 'package:chinobox/src/features/content/data/parsers/libvio_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/tbys_parser.dart';
+import 'package:chinobox/src/features/content/data/parsers/yjys_parser.dart';
 import 'package:chinobox/src/features/content/data/site_parser.dart';
 import 'package:chinobox/src/features/settings/app_settings.dart';
+import 'package:chinobox/src/features/source/domain/source_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' as html_parser;
 
@@ -119,7 +122,87 @@ void main() {
     });
   });
 
-  test('decodes encrypted player_aaaa m3u8 urls', () {
+  group('LibvioParser', () {
+    test('parses hero detail and skips netdisk panels', () {
+      final parser = LibvioParser();
+      final settings = AppSettings.defaults();
+      final detail = parser.parseDetail(
+        html_parser.parse('''
+          <div class="vod-hero__inner">
+            <div class="vod-poster"><img data-original="/poster.jpg"></div>
+            <div class="vod-info">
+              <h1>瑞克和莫蒂 第九季</h1>
+              <div class="meta-item">更新：第02集</div>
+              <div class="vod-rating"><span class="score">8.8</span></div>
+              <span class="detail-content">动画简介</span>
+            </div>
+          </div>
+          <div class="playlist-panel">
+            <div class="panel-head"><h3>BD5播放</h3></div>
+            <ul class="stui-content__playlist">
+              <li><a href="/w/714893469-3-1.html">第01集</a></li>
+              <li><a href="/w/714893469-3-2.html">第02集</a></li>
+            </ul>
+          </div>
+          <div class="playlist-panel netdisk-panel">
+            <div class="panel-head"><h3>视频下载 (夸克)</h3></div>
+            <a href="https://pan.quark.cn/s/xxx">网盘</a>
+          </div>
+        '''),
+        settings,
+        '/detail/714893469.html',
+      );
+
+      expect(detail.title, '瑞克和莫蒂 第九季');
+      expect(detail.poster, 'https://www.libvio.run/poster.jpg');
+      expect(detail.summary, '动画简介');
+      expect(detail.groups, hasLength(1));
+      expect(detail.groups.single.title, 'BD5播放');
+      expect(detail.groups.single.episodes, hasLength(2));
+    });
+  });
+
+  group('YjysParser', () {
+    test('groups current play-list anchors into one source', () {
+      final parser = YjysParser();
+      final settings = AppSettings.defaults();
+      final detail = parser.parseDetail(
+        html_parser.parse('''
+          <h1 class="movie-title">焕心</h1>
+          <div class="movie-poster"><img src="/poster.jpg"></div>
+          <div class="score-text">7.1</div>
+          <div class="desc">国产剧简介</div>
+          <div class="play-wrapper">
+            <div class="play-list">
+              <a class="play-item" href="/guoju/play/26944-0.htm">第1集</a>
+              <a class="play-item" href="/guoju/play/26944-1.htm">第2集</a>
+            </div>
+          </div>
+        '''),
+        settings,
+        '/guoju/26944.htm',
+      );
+
+      expect(detail.title, '焕心');
+      expect(detail.groups, hasLength(1));
+      expect(detail.groups.single.title, '在线播放');
+      expect(detail.groups.single.episodes, hasLength(2));
+    });
+  });
+
+  test('source switch hides deferred sources', () {
+    final visibleIds = visibleSourceCatalog().map((source) => source.id);
+
+    expect(defaultSourceId, 'libvio');
+    expect(visibleIds, containsAll(['tbys', 'libvio', 'yjys']));
+    expect(visibleIds, isNot(contains('anfuns')));
+    expect(visibleIds, isNot(contains('zxzj')));
+    expect(visibleIds, isNot(contains('five_movie')));
+    expect(visibleIds, isNot(contains('xbyy')));
+    expect(visibleIds, isNot(contains('nyyy')));
+  });
+
+  test('decodes encrypted player_aaaa m3u8 and direct mp4 urls', () {
     final items = extractDirectPlayItems('''
       <script>
       var player_aaaa = {"encrypt":2,
@@ -129,5 +212,15 @@ void main() {
 
     expect(items, hasLength(1));
     expect(items.first.url, 'https://example.com/a/playlist.m3u8');
+
+    final direct = extractDirectPlayItems('''
+      <script>
+      var player_aaaa = {"encrypt":3,
+        "url":"https:\\/\\/v.example.com\\/video.mp4"};
+      </script>
+    ''');
+
+    expect(direct, hasLength(1));
+    expect(direct.first.url, 'https://v.example.com/video.mp4');
   });
 }

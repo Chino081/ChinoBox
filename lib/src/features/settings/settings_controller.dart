@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/storage/local_store.dart';
+import '../source/domain/source_catalog.dart';
 import 'app_settings.dart';
 
 final settingsControllerProvider =
@@ -19,7 +20,14 @@ class SettingsController extends StateNotifier<AppSettings> {
   final LocalStore _store;
 
   Future<void> load() async {
-    state = await _store.loadSettings();
+    final loaded = await _store.loadSettings();
+    final source = sourceById(loaded.sourceId);
+    if (source.visible) {
+      state = loaded;
+    } else {
+      state = loaded.copyWith(sourceId: defaultSourceId);
+      await _store.saveSettings(state);
+    }
   }
 
   Future<void> _save(AppSettings settings) async {

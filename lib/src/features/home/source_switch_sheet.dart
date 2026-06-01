@@ -20,15 +20,16 @@ class SourceSwitchSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selected = ref.watch(settingsControllerProvider).sourceId;
+    final sources = visibleSourceCatalog();
     return SafeArea(
       child: ListView.separated(
         shrinkWrap: true,
-        itemCount: sourceCatalog.length,
+        itemCount: sources.length,
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (context, index) {
-          final source = sourceCatalog[index];
+          final source = sources[index];
           return ListTile(
-            enabled: source.isAvailable,
+            enabled: source.isSelectable,
             leading: Icon(
               source.kind == SourceKind.movies
                   ? Icons.movie_outlined
@@ -48,7 +49,7 @@ class SourceSwitchSheet extends ConsumerWidget {
             ),
             trailing:
                 selected == source.id ? const Icon(Icons.check_rounded) : null,
-            onTap: source.isAvailable
+            onTap: source.isSelectable
                 ? () async {
                     await ref
                         .read(settingsControllerProvider.notifier)

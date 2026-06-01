@@ -1,5 +1,12 @@
-import 'package:html/dom.dart';
+import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+import 'package:html/dom.dart';
+import 'package:html/parser.dart' as html_parser;
+import 'package:pointycastle/export.dart';
+
+import '../../../../core/network/movies_http_client.dart';
 import '../../../settings/app_settings.dart';
 import '../../../source/domain/source_catalog.dart';
 import '../../domain/content_models.dart';
@@ -81,23 +88,7 @@ class YjysParser extends SiteParser {
   MediaDetail parseDetail(Document document, AppSettings settings, String url) {
     final base = domain(settings);
     final root = document.body ?? document.documentElement!;
-    final groups = root
-        .querySelectorAll('.play-item, .btn-group')
-        .map((list) {
-          final episodes = list
-              .querySelectorAll('a')
-              .map((a) {
-                return Episode(
-                    title: cleanText(a.text),
-                    url: absolutize(a.attributes['href'] ?? '', base));
-              })
-              .where((episode) =>
-                  episode.title.isNotEmpty && episode.url.isNotEmpty)
-              .toList();
-          return EpisodeGroup(title: '播放源', episodes: episodes);
-        })
-        .where((group) => group.episodes.isNotEmpty)
-        .toList();
+    final groups = _parseEpisodeGroups(root, base);
 
     final tags = root
         .querySelectorAll('.info-list .info-item a.info-value')
@@ -118,5 +109,153 @@ class YjysParser extends SiteParser {
       groups: groups,
       recommendations: parseList(document, settings).take(12).toList(),
     );
+  }
+
+  @override
+  List<Episode> parseCurrentEpisodes(
+    Document document,
+    AppSettings settings,
+    int groupIndex,
+    String currentUrl,
+  ) {
+    final groups = _parseEpisodeGroups(
+      document.body ?? document.documentElement ?? Element.tag('html'),
+      domain(settings),
+    );
+    if (groupIndex >= 0 && groupIndex < groups.length) {
+      return groups[groupIndex].episodes;
+    }
+    return groups.expand((group) => group.episodes).toList();
+  }
+
+  @override
+  Future<List<PlayItem>> loadPlayItems(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String episodeUrl,
+  ) async {
+    final resolved = episodePageUrl(settings, episodeUrl);
+    final body =
+        await client.getText(resolved, headers: requestHeaders(settings));
+    final direct = parsePlayItems(html_parser.parse(body), settings);
+    if (direct.isNotEmpty) return direct;
+
+    final pid = RegExp(r'var\s+pid\s*=\s*(\d+)').firstMatch(body)?.group(1);
+    if (pid == null || pid.isEmpty) return const [];
+    return _loadLinePlayItems(client, settings, pid, referer: resolved);
+  }
+
+  List<EpisodeGroup> _parseEpisodeGroups(Element root, String base) {
+    final groups = <EpisodeGroup>[];
+    for (final list in root.querySelectorAll('.play-list, .btn-group')) {
+      final episodes = _parseEpisodeAnchors(list, base);
+      if (episodes.isEmpty) continue;
+      groups.add(EpisodeGroup(
+        title: groups.isEmpty ? '在线播放' : '播放源 ${groups.length + 1}',
+        episodes: episodes,
+      ));
+    }
+    return groups;
+  }
+
+  List<Episode> _parseEpisodeAnchors(Element root, String base) {
+    final episodes = <Episode>[];
+    final seen = <String>{};
+    for (final anchor in root.querySelectorAll('a[href]')) {
+      final href = anchor.attributes['href'] ?? '';
+      final title = cleanText(anchor.text);
+      if (href.isEmpty || title.isEmpty || !href.contains('/play/')) continue;
+      final url = absolutize(href, base);
+      if (seen.add(url)) episodes.add(Episode(title: title, url: url));
+    }
+    return episodes;
+  }
+
+  Future<List<PlayItem>> _loadLinePlayItems(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String pid, {
+    required String referer,
+  }) async {
+    final timestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    final signature = _lineSignature(pid, timestamp);
+    final api = Uri.parse(domain(settings)).replace(
+      path: '/lines',
+      queryParameters: {
+        't': timestamp,
+        'sg': signature,
+        'pid': pid,
+      },
+    ).toString();
+    final body = await client.getText(
+      api,
+      headers: {
+        ...requestHeaders(settings),
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Referer': referer,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    );
+    return _parseLinePlayItems(body, domain(settings));
+  }
+
+  List<PlayItem> _parseLinePlayItems(String body, String base) {
+    final items = <PlayItem>[];
+    final seen = <String>{};
+    Object? decoded;
+    try {
+      decoded = jsonDecode(body);
+    } catch (_) {
+      return const [];
+    }
+    if (decoded is! Map<String, dynamic>) return const [];
+    final data = decoded['data'];
+    if (data is! Map<String, dynamic>) return const [];
+
+    void addUrl(String value) {
+      final cleaned = _cleanPlayUrl(value, base);
+      if (cleaned.isEmpty || !cleaned.startsWith('http')) return;
+      if (seen.add(cleaned)) {
+        items.add(PlayItem(url: cleaned, type: _playType(cleaned)));
+      }
+    }
+
+    for (final key in const ['url3', 'm3u8', 'm3u8_2']) {
+      final value = data[key]?.toString() ?? '';
+      for (final part in value.split(',')) {
+        addUrl(part);
+      }
+    }
+    return items;
+  }
+
+  String _lineSignature(String pid, String timestamp) {
+    final plain = '$pid-$timestamp';
+    final keyText = md5.convert(utf8.encode(plain)).toString().substring(0, 16);
+    final cipher = PaddedBlockCipher('AES/ECB/PKCS7')
+      ..init(
+        true,
+        PaddedBlockCipherParameters<KeyParameter, Null>(
+          KeyParameter(Uint8List.fromList(utf8.encode(keyText))),
+          null,
+        ),
+      );
+    final encrypted = cipher.process(Uint8List.fromList(utf8.encode(plain)));
+    return encrypted
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+  }
+
+  String _cleanPlayUrl(String value, String base) {
+    final withoutName = value.split('#').first.trim();
+    if (withoutName.isEmpty) return '';
+    return withoutName.replaceFirst('https://www.bde4.cc', base);
+  }
+
+  PlayType _playType(String url) {
+    final lower = url.toLowerCase();
+    if (lower.contains('.m3u8')) return PlayType.m3u8;
+    if (lower.contains('.mp4')) return PlayType.mp4;
+    return PlayType.other;
   }
 }

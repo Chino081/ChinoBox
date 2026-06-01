@@ -31,7 +31,7 @@ class ParserRegistry {
   };
 
   static SiteParser byId(String sourceId) {
-    return _parsers[sourceId] ?? _parsers[sourceCatalog.first.id]!;
+    return _parsers[sourceId] ?? _parsers[defaultSourceId]!;
   }
 }
 

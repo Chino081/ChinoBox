@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../source/domain/source_catalog.dart';
+
 class AppSettings {
   const AppSettings({
     required this.sourceId,
@@ -13,7 +15,7 @@ class AppSettings {
 
   factory AppSettings.defaults() {
     return const AppSettings(
-      sourceId: 'zxzj',
+      sourceId: defaultSourceId,
       proxy: '',
       userDomains: {},
       sourceCookies: {},
@@ -26,7 +28,7 @@ class AppSettings {
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final themeName = json['themeMode'] as String? ?? 'system';
     return AppSettings(
-      sourceId: json['sourceId'] as String? ?? 'zxzj',
+      sourceId: json['sourceId'] as String? ?? defaultSourceId,
       proxy: json['proxy'] as String? ?? '',
       userDomains: Map<String, String>.from(json['userDomains'] as Map? ?? {}),
       sourceCookies:
