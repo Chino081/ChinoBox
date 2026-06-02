@@ -65,7 +65,7 @@ class PlayerPage extends ConsumerStatefulWidget {
   ConsumerState<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends ConsumerState<PlayerPage> {
+class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   final _bridge = PlayerPlatformBridge.instance;
 
   media_kit.Player? _mediaKitPlayer;
@@ -89,9 +89,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   var _isLoading = true;
   var _externalOnly = false;
   var _isFullscreen = false;
+  var _controlsVisible = true;
+  var _controlsLocked = false;
   var _completionHandled = false;
   var _loadingEpisodes = false;
   var _disposed = false;
+  var _fitMode = _VideoFitMode.contain;
+  Timer? _hideControlsTimer;
   String? _error;
 
   @override
@@ -105,6 +109,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     _currentPlayHeaders = Map.of(widget.playHeaders);
     _currentPlayTitle = widget.playTitle;
     _normalizeEpisodeIndex();
+    if (_isDesktopPlatform) {
+      windowManager.addListener(this);
+      unawaited(_syncDesktopFullscreenState());
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isMobilePlatform) {
+        unawaited(_setFullscreen(true));
+      }
+    });
     unawaited(_loadEpisodesIfNeeded());
     unawaited(_startFromSettings());
     unawaited(_saveHistory());
@@ -113,10 +126,35 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   @override
   void dispose() {
     _disposed = true;
+    _hideControlsTimer?.cancel();
+    if (_isDesktopPlatform) {
+      windowManager.removeListener(this);
+    }
     unawaited(_saveHistory());
     unawaited(_disposePlaybackEngines());
     unawaited(_restoreSystemUi());
     super.dispose();
+  }
+
+  @override
+  void onWindowEnterFullScreen() {
+    if (!mounted) return;
+    setState(() {
+      _isFullscreen = true;
+      _controlsVisible = true;
+    });
+    _scheduleControlsHide();
+  }
+
+  @override
+  void onWindowLeaveFullScreen() {
+    if (!mounted) return;
+    setState(() {
+      _isFullscreen = false;
+      _controlsVisible = true;
+      _controlsLocked = false;
+    });
+    _scheduleControlsHide();
   }
 
   @override
@@ -183,24 +221,30 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Widget _buildPlayerStage(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned.fill(child: _buildVideoSurface()),
-        if (_externalOnly) Positioned.fill(child: _buildExternalOnlyView()),
-        if (_error != null && !_externalOnly)
-          Positioned.fill(child: _buildErrorView(_error!)),
-        if (_isLoading && !_externalOnly)
-          const Positioned.fill(
-            child: ColoredBox(
-              color: Color(0x66000000),
-              child: Center(
-                child: CircularProgressIndicator(color: Colors.white),
+    return MouseRegion(
+      onHover: (_) => _showControls(),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _handleStageTap,
+        child: Stack(
+          children: [
+            Positioned.fill(child: _buildVideoSurface()),
+            if (_externalOnly) Positioned.fill(child: _buildExternalOnlyView()),
+            if (_error != null && !_externalOnly)
+              Positioned.fill(child: _buildErrorView(_error!)),
+            if (_isLoading && !_externalOnly)
+              const Positioned.fill(
+                child: ColoredBox(
+                  color: Color(0x66000000),
+                  child: Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                ),
               ),
-            ),
-          ),
-        if (_isFullscreen) _buildFullscreenTopBar(),
-        if (!_externalOnly) _buildControlOverlay(context),
-      ],
+            if (!_externalOnly) _buildControlOverlay(context),
+          ],
+        ),
+      ),
     );
   }
 
@@ -210,7 +254,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     return media_video.Video(
       controller: controller,
       controls: null,
-      fit: BoxFit.contain,
+      fit: _fitMode.fit,
       fill: Colors.black,
       pauseUponEnteringBackgroundMode: false,
     );
@@ -317,7 +361,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _buildFullscreenTopBar() {
+  Widget _buildTopControls() {
     return Positioned(
       top: 0,
       left: 0,
@@ -332,27 +376,47 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         ),
         child: SafeArea(
           bottom: false,
-          child: Row(
-            children: [
-              IconButton(
-                tooltip: '退出全屏',
-                color: Colors.white,
-                onPressed: () => unawaited(_setFullscreen(false)),
-                icon: const Icon(Icons.arrow_back_rounded),
-              ),
-              Expanded(
-                child: Text(
-                  _titleText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 34),
+            child: Row(
+              children: [
+                _buildOverlayIconButton(
+                  tooltip: '返回',
+                  icon: Icons.arrow_back_rounded,
+                  onPressed: () => unawaited(_leavePlayerOrFullscreen()),
+                ),
+                Expanded(
+                  child: Text(
+                    _titleText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-            ],
+                _buildOverlayIconButton(
+                  tooltip: '外置播放器',
+                  icon: Icons.open_in_new_rounded,
+                  onPressed: () => unawaited(_openExternalPlayer()),
+                ),
+                if (_bridge.supportsAndroidPlayerActions)
+                  _buildOverlayIconButton(
+                    tooltip: '画中画',
+                    icon: Icons.picture_in_picture_alt_rounded,
+                    onPressed: () => unawaited(_enterPictureInPicture()),
+                  ),
+                _buildOverlayIconButton(
+                  tooltip: _isFullscreen ? '退出全屏' : '全屏',
+                  icon: _isFullscreen
+                      ? Icons.fullscreen_exit_rounded
+                      : Icons.fullscreen_rounded,
+                  onPressed: () => unawaited(_setFullscreen(!_isFullscreen)),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -365,8 +429,129 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         : _duration.inMilliseconds.toDouble();
     final progressValue =
         _position.inMilliseconds.clamp(0, progressMax.toInt()).toDouble();
-    final foreground = Colors.white.withValues(alpha: 0.92);
 
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: !_controlsVisible,
+        child: AnimatedOpacity(
+          opacity: _controlsVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ColoredBox(
+                  color: _controlsLocked
+                      ? Colors.transparent
+                      : const Color(0x26000000),
+                ),
+              ),
+              if (!_controlsLocked && _isFullscreen) _buildTopControls(),
+              if (_controlsLocked) ..._buildLockButtons(locked: true),
+              if (!_controlsLocked) ...[
+                _buildLockButton(
+                  alignment: Alignment.centerLeft,
+                  locked: false,
+                ),
+                _buildLockButton(
+                  alignment: Alignment.centerRight,
+                  locked: false,
+                ),
+                _buildCenterControls(),
+                _buildBottomControls(
+                  context,
+                  progressMax: progressMax,
+                  progressValue: progressValue,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCenterControls() {
+    return Positioned.fill(
+      child: Center(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildSeekButton(
+              tooltip: '后退15秒',
+              icon: Icons.fast_rewind_rounded,
+              label: '15s',
+              reverseLabel: true,
+              onPressed: () => unawaited(_seekRelative(-15)),
+            ),
+            const SizedBox(width: 30),
+            _buildPlayPauseButton(),
+            const SizedBox(width: 30),
+            _buildSeekButton(
+              tooltip: '前进15秒',
+              icon: Icons.fast_forward_rounded,
+              label: '15s',
+              onPressed: () => unawaited(_seekRelative(15)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlayPauseButton() {
+    return Material(
+      color: const Color(0x66000000),
+      shape: const CircleBorder(),
+      child: IconButton(
+        tooltip: _isPlaying ? '暂停' : '播放',
+        iconSize: 52,
+        color: Colors.white,
+        padding: const EdgeInsets.all(20),
+        onPressed: _isLoading ? null : () => unawaited(_togglePlay()),
+        icon: Icon(_isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+      ),
+    );
+  }
+
+  Widget _buildSeekButton({
+    required String tooltip,
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    bool reverseLabel = false,
+  }) {
+    final iconWidget = Icon(icon, size: 44, color: Colors.white);
+    final labelWidget = Text(
+      label,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 15,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    return Tooltip(
+      message: tooltip,
+      child: TextButton(
+        onPressed: _isLoading ? null : onPressed,
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: reverseLabel
+              ? [labelWidget, const SizedBox(width: 8), iconWidget]
+              : [iconWidget, const SizedBox(width: 8), labelWidget],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomControls(
+    BuildContext context, {
+    required double progressMax,
+    required double progressValue,
+  }) {
     return Positioned(
       left: 0,
       right: 0,
@@ -376,39 +561,106 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           gradient: LinearGradient(
             begin: Alignment.bottomCenter,
             end: Alignment.topCenter,
-            colors: [Color(0xDD000000), Color(0x00000000)],
+            colors: [Color(0xCC000000), Color(0x00000000)],
           ),
         ),
         child: SafeArea(
           top: false,
-          minimum: const EdgeInsets.symmetric(horizontal: 4),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(10, 28, 10, _isFullscreen ? 10 : 8),
+            padding: const EdgeInsets.fromLTRB(18, 42, 18, 8),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    activeTrackColor: Colors.white,
-                    inactiveTrackColor: Colors.white24,
-                    thumbColor: Colors.white,
-                    overlayColor: Colors.white24,
-                  ),
-                  child: Slider(
-                    min: 0,
-                    max: progressMax,
-                    value: progressValue,
-                    onChanged: (value) {
-                      setState(() {
-                        _position = Duration(milliseconds: value.round());
-                      });
-                    },
-                    onChangeEnd: (value) {
-                      unawaited(_seek(Duration(milliseconds: value.round())));
-                    },
-                  ),
+                Row(
+                  children: [
+                    _buildTimeText(_formatDuration(_position)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          activeTrackColor: const Color(0xFFFF4081),
+                          inactiveTrackColor: Colors.white30,
+                          thumbColor: const Color(0xFFFF4081),
+                          overlayColor: const Color(0x33FF4081),
+                          trackHeight: 7,
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 8,
+                          ),
+                        ),
+                        child: Slider(
+                          min: 0,
+                          max: progressMax,
+                          value: progressValue,
+                          onChangeStart: (_) => _pinControls(),
+                          onChanged: (value) {
+                            _showControls(autoHide: false);
+                            setState(() {
+                              _position = Duration(milliseconds: value.round());
+                            });
+                          },
+                          onChangeEnd: (value) {
+                            unawaited(
+                              _seek(Duration(milliseconds: value.round())),
+                            );
+                            _scheduleControlsHide();
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _buildTimeText(_formatDuration(_duration)),
+                  ],
                 ),
-                _buildTransportControls(foreground),
+                const SizedBox(height: 2),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 560;
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      reverse: true,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isBuffering) ...[
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          _buildNextPill(compact: compact),
+                          _buildBottomTextButton(
+                            label: _fitMode.label,
+                            icon: Icons.aspect_ratio_rounded,
+                            onPressed: () => unawaited(_showFitModeMenu()),
+                          ),
+                          _buildBottomTextButton(
+                            label: _isFullscreen ? '退出全屏' : '全屏',
+                            icon: _isFullscreen
+                                ? Icons.fullscreen_exit_rounded
+                                : Icons.fullscreen_rounded,
+                            onPressed: () =>
+                                unawaited(_setFullscreen(!_isFullscreen)),
+                          ),
+                          _buildBottomTextButton(
+                            label: '倍速 x$_rateLabel',
+                            icon: Icons.speed_rounded,
+                            onPressed: () => unawaited(_showSpeedMenu()),
+                          ),
+                          _buildBottomTextButton(
+                            label: '选集',
+                            icon: Icons.playlist_play_rounded,
+                            onPressed: () => unawaited(_showEpisodeSheet()),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -417,154 +669,112 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _buildTransportControls(Color foreground) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 430;
-        final timeLabel = Text(
-          '${_formatDuration(_position)} / ${_formatDuration(_duration)}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: foreground, fontSize: 12),
-        );
-        final playButton = IconButton(
-          tooltip: _isPlaying ? '暂停' : '播放',
+  Widget _buildTimeText(String text) {
+    return SizedBox(
+      width: 48,
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.clip,
+        style: const TextStyle(
           color: Colors.white,
-          onPressed: _isLoading ? null : () => unawaited(_togglePlay()),
-          icon:
-              Icon(_isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
-        );
-        final actions = _buildActionButtons();
-
-        if (compact) {
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  playButton,
-                  Flexible(child: timeLabel),
-                  if (_isBuffering) ..._buildBufferingIndicator(),
-                ],
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: _buildActionScroller(actions),
-              ),
-            ],
-          );
-        }
-
-        return Row(
-          children: [
-            playButton,
-            Flexible(child: timeLabel),
-            if (_isBuffering) ..._buildBufferingIndicator(),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: _buildActionScroller(actions),
-              ),
-            ),
-          ],
-        );
-      },
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
-  List<Widget> _buildBufferingIndicator() {
-    return const [
-      SizedBox(width: 8),
-      SizedBox(
-        width: 14,
-        height: 14,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: Colors.white,
+  Widget _buildNextPill({required bool compact}) {
+    if (!_hasNext) return const SizedBox.shrink();
+    final nextTitle = _episodes[_episodeIndex + 1].title;
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: OutlinedButton.icon(
+        onPressed: () => unawaited(_playNext()),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Colors.white,
+          side: const BorderSide(color: Colors.white70),
+          shape: const StadiumBorder(),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 10 : 14,
+            vertical: 8,
+          ),
+        ),
+        icon: const Icon(Icons.skip_next_rounded, size: 20),
+        label: Text(
+          compact ? '下一集' : '下一集 $nextTitle',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
+    );
+  }
+
+  Widget _buildBottomTextButton({
+    required String label,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      ),
+      icon: Icon(icon, size: 20),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  List<Widget> _buildLockButtons({required bool locked}) {
+    return [
+      _buildLockButton(alignment: Alignment.centerLeft, locked: locked),
+      _buildLockButton(alignment: Alignment.centerRight, locked: locked),
     ];
   }
 
-  Widget _buildActionScroller(Widget child) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      reverse: true,
-      child: child,
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildSpeedMenu(),
-        IconButton(
-          tooltip: '下一集',
-          color: Colors.white,
-          onPressed: _hasNext ? () => unawaited(_playNext()) : null,
-          icon: const Icon(Icons.skip_next_rounded),
-        ),
-        IconButton(
-          tooltip: '外置播放器',
-          color: Colors.white,
-          onPressed: () => unawaited(_openExternalPlayer()),
-          icon: const Icon(Icons.open_in_new_rounded),
-        ),
-        if (_bridge.supportsAndroidPlayerActions)
-          IconButton(
-            tooltip: '画中画',
-            color: Colors.white,
-            onPressed: () => unawaited(_enterPictureInPicture()),
-            icon: const Icon(Icons.picture_in_picture_alt_rounded),
-          ),
-        IconButton(
-          tooltip: _isFullscreen ? '退出全屏' : '全屏',
-          color: Colors.white,
-          onPressed: () => unawaited(_setFullscreen(!_isFullscreen)),
-          icon: Icon(
-            _isFullscreen
-                ? Icons.fullscreen_exit_rounded
-                : Icons.fullscreen_rounded,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSpeedMenu() {
-    return PopupMenuButton<double>(
-      tooltip: '倍速',
-      onSelected: (value) => unawaited(_setRate(value)),
-      itemBuilder: (context) => [
-        for (final rate in _playbackRates)
-          PopupMenuItem(
-            value: rate,
-            child: Row(
-              children: [
-                if (_rate == rate) const Icon(Icons.check_rounded, size: 18),
-                if (_rate != rate) const SizedBox(width: 18),
-                const SizedBox(width: 8),
-                Text(
-                    '${rate.toStringAsFixed(rate.truncateToDouble() == rate ? 0 : 2)}x'),
-              ],
+  Widget _buildLockButton({
+    required Alignment alignment,
+    required bool locked,
+  }) {
+    return Align(
+      alignment: alignment,
+      child: SafeArea(
+        left: alignment == Alignment.centerLeft,
+        right: alignment == Alignment.centerRight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          child: IconButton(
+            tooltip: locked ? '解锁按钮' : '锁定按钮',
+            onPressed: _toggleControlsLock,
+            style: IconButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: const Color(0x33000000),
             ),
-          ),
-      ],
-      child: SizedBox(
-        height: 48,
-        width: 48,
-        child: Center(
-          child: Text(
-            '${_rate.toStringAsFixed(_rate.truncateToDouble() == _rate ? 0 : 2)}x',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w700,
-            ),
+            icon: Icon(locked ? Icons.lock_rounded : Icons.lock_open_rounded),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildOverlayIconButton({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return IconButton(
+      tooltip: tooltip,
+      color: Colors.white,
+      onPressed: onPressed,
+      icon: Icon(icon),
     );
   }
 
@@ -686,6 +896,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           _isLoading = false;
           _error = null;
         });
+        _scheduleControlsHide();
       }
     } catch (error) {
       if (mounted) {
@@ -741,19 +952,168 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     } else {
       await player.play();
     }
+    _showControls();
   }
 
   Future<void> _seek(Duration position) async {
     await _mediaKitPlayer?.seek(position);
+    _showControls();
   }
 
   Future<void> _setRate(double rate) async {
     if (mounted) setState(() => _rate = rate);
     try {
       await _mediaKitPlayer?.setRate(rate);
+      _showControls();
     } catch (error) {
       _showMessage(error.toString());
     }
+  }
+
+  Future<void> _showSpeedMenu() async {
+    _pinControls();
+    final selected = await showModalBottomSheet<double>(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final rate in _playbackRates)
+                ListTile(
+                  leading: _rate == rate
+                      ? const Icon(Icons.check_rounded, color: Colors.white)
+                      : const SizedBox(width: 24),
+                  title: Text(
+                    '${_formatRate(rate)}x',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () => Navigator.of(context).pop(rate),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected != null) {
+      await _setRate(selected);
+    }
+    _showControls();
+  }
+
+  Future<void> _showFitModeMenu() async {
+    _pinControls();
+    final selected = await showModalBottomSheet<_VideoFitMode>(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (final mode in _VideoFitMode.values)
+                ListTile(
+                  leading: _fitMode == mode
+                      ? const Icon(Icons.check_rounded, color: Colors.white)
+                      : const SizedBox(width: 24),
+                  title: Text(
+                    mode.label,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  onTap: () => Navigator.of(context).pop(mode),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected != null) {
+      setState(() => _fitMode = selected);
+    }
+    _showControls();
+  }
+
+  Future<void> _showEpisodeSheet() async {
+    _pinControls();
+    await _loadEpisodesIfNeeded();
+    if (!mounted) return;
+    if (_episodes.isEmpty) {
+      _showMessage('暂无选集');
+      _showControls();
+      return;
+    }
+
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF101010),
+      showDragHandle: true,
+      builder: (context) {
+        final height =
+            MediaQuery.sizeOf(context).height * (_isFullscreen ? 0.82 : 0.64);
+        return SafeArea(
+          child: SizedBox(
+            height: height,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '选集',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: GridView.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 118,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        childAspectRatio: 2.45,
+                      ),
+                      itemCount: _episodes.length,
+                      itemBuilder: (context, index) {
+                        final episode = _episodes[index];
+                        final selected = index == _episodeIndex;
+                        return FilledButton.tonal(
+                          onPressed: () => Navigator.of(context).pop(index),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: selected
+                                ? const Color(0xFFFF4081)
+                                : const Color(0xFF252525),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: Text(
+                            episode.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected != null && selected != _episodeIndex) {
+      await _playEpisodeAt(selected);
+    }
+    _showControls();
   }
 
   Future<void> _playNext() async {
@@ -763,12 +1123,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       return;
     }
 
-    final nextIndex = _episodeIndex + 1;
-    final next = _episodes[nextIndex];
+    await _playEpisodeAt(_episodeIndex + 1);
+  }
+
+  Future<void> _playEpisodeAt(int index) async {
+    await _loadEpisodesIfNeeded();
+    if (index < 0 || index >= _episodes.length) return;
+    final next = _episodes[index];
     if (mounted) {
       setState(() {
         _isLoading = true;
         _error = null;
+        _controlsVisible = true;
       });
     }
 
@@ -777,9 +1143,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       final items = await ref
           .read(contentRepositoryProvider)
           .playItems(widget.sourceId, next.url);
-      if (items.isEmpty) throw StateError('未找到下一集播放地址');
+      if (items.isEmpty) throw StateError('未找到播放地址');
       final play = items.first;
-      _episodeIndex = nextIndex;
+      _episodeIndex = index;
       _currentEpisodeTitle = next.title;
       _currentEpisodeUrl = next.url;
       _currentPlayUrl = play.url;
@@ -857,12 +1223,99 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     }
   }
 
-  Future<void> _setFullscreen(bool value) async {
-    if (_isFullscreen == value) return;
-    if (mounted) setState(() => _isFullscreen = value);
-    if (_isDesktopPlatform) {
-      await windowManager.setFullScreen(value);
+  Future<void> _leavePlayerOrFullscreen() async {
+    if (_isFullscreen) {
+      await _setFullscreen(false);
       return;
+    }
+    if (mounted) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _seekRelative(int seconds) async {
+    final target = _position + Duration(seconds: seconds);
+    final upperBound = _duration > Duration.zero ? _duration : target;
+    final clamped = target < Duration.zero
+        ? Duration.zero
+        : target > upperBound
+            ? upperBound
+            : target;
+    await _seek(clamped);
+    _showControls();
+  }
+
+  void _handleStageTap() {
+    if (_controlsVisible && !_isLoading) {
+      _hideControlsTimer?.cancel();
+      setState(() => _controlsVisible = false);
+      return;
+    }
+    _showControls();
+  }
+
+  void _showControls({bool autoHide = true}) {
+    if (!mounted || _disposed) return;
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+    }
+    if (autoHide) {
+      _scheduleControlsHide();
+    }
+  }
+
+  void _pinControls() {
+    _hideControlsTimer?.cancel();
+  }
+
+  void _scheduleControlsHide() {
+    _hideControlsTimer?.cancel();
+    if (_isLoading || _externalOnly) return;
+    _hideControlsTimer = Timer(_controlAutoHideDelay, () {
+      if (!mounted || _disposed) return;
+      setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _toggleControlsLock() {
+    setState(() {
+      _controlsLocked = !_controlsLocked;
+      _controlsVisible = true;
+    });
+    _scheduleControlsHide();
+  }
+
+  Future<void> _syncDesktopFullscreenState() async {
+    if (!_isDesktopPlatform) return;
+    final value = await windowManager.isFullScreen();
+    if (!mounted || _isFullscreen == value) return;
+    setState(() => _isFullscreen = value);
+  }
+
+  Future<void> _setFullscreen(bool value) async {
+    if (_isDesktopPlatform) {
+      final current = await windowManager.isFullScreen();
+      if (current != value) {
+        await windowManager.setFullScreen(value);
+      }
+      if (!mounted) return;
+      setState(() {
+        _isFullscreen = value;
+        _controlsVisible = true;
+        if (!value) _controlsLocked = false;
+      });
+      _scheduleControlsHide();
+      return;
+    }
+
+    if (_isFullscreen == value) return;
+    if (mounted) {
+      setState(() {
+        _isFullscreen = value;
+        _controlsVisible = true;
+        if (!value) _controlsLocked = false;
+      });
+      _scheduleControlsHide();
     }
     if (value) {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -1029,6 +1482,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   bool get _hasNext =>
       _episodeIndex >= 0 && _episodeIndex + 1 < _episodes.length;
 
+  String get _rateLabel => _formatRate(_rate);
+
   String get _titleText {
     final episode =
         _currentEpisodeTitle.isEmpty ? '' : ' $_currentEpisodeTitle';
@@ -1038,6 +1493,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   bool get _isDesktopPlatform =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  bool get _isMobilePlatform => Platform.isAndroid || Platform.isIOS;
 }
 
 class _ResolvedMedia {
@@ -1066,6 +1523,22 @@ const _browserUserAgent =
     '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 const _playbackRates = [0.75, 1.0, 1.25, 1.5, 2.0];
+const _controlAutoHideDelay = Duration(seconds: 5);
+
+enum _VideoFitMode {
+  contain('自适应比例', BoxFit.contain),
+  cover('填充屏幕', BoxFit.cover),
+  fill('拉伸铺满', BoxFit.fill);
+
+  const _VideoFitMode(this.label, this.fit);
+
+  final String label;
+  final BoxFit fit;
+}
+
+String _formatRate(double rate) {
+  return rate.toStringAsFixed(rate.truncateToDouble() == rate ? 0 : 2);
+}
 
 String _formatDuration(Duration duration) {
   final totalSeconds = duration.inSeconds;
