@@ -2,13 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flv_lzc/fijkplayer.dart' as ijk;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart' as media_kit;
 import 'package:media_kit_video/media_kit_video.dart' as media_video;
-import 'package:video_player/video_player.dart' as exo;
+import 'package:window_manager/window_manager.dart';
 
 import '../../core/network/playback_proxy.dart';
 import '../content/data/content_repository.dart';
@@ -73,12 +72,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   media_video.VideoController? _mediaKitController;
   final _mediaKitSubscriptions = <StreamSubscription<dynamic>>[];
 
-  exo.VideoPlayerController? _exoController;
-
-  ijk.FijkPlayer? _ijkPlayer;
-  StreamSubscription<Duration>? _ijkPositionSub;
-  StreamSubscription<bool>? _ijkBufferingSub;
-
   late List<PlayerEpisodeRef> _episodes;
   late int _episodeIndex;
   late String _currentEpisodeTitle;
@@ -87,7 +80,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   late Map<String, String> _currentPlayHeaders;
   late String _currentPlayTitle;
 
-  PlayerEngine _activeEngine = PlayerEngine.mediaKit;
   _ResolvedMedia? _activeMedia;
   var _position = Duration.zero;
   var _duration = Duration.zero;
@@ -170,7 +162,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Widget _buildBody(BuildContext context, AppSettings settings) {
     if (_isFullscreen) {
-      return _buildPlayerStage(context, settings);
+      return _buildPlayerStage(context);
     }
     return Column(
       children: [
@@ -180,7 +172,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               constraints: const BoxConstraints(maxWidth: 1180),
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: _buildPlayerStage(context, settings),
+                child: _buildPlayerStage(context),
               ),
             ),
           ),
@@ -190,7 +182,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _buildPlayerStage(BuildContext context, AppSettings settings) {
+  Widget _buildPlayerStage(BuildContext context) {
     return Stack(
       children: [
         Positioned.fill(child: _buildVideoSurface()),
@@ -207,45 +199,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             ),
           ),
         if (_isFullscreen) _buildFullscreenTopBar(),
-        if (!_externalOnly) _buildControlOverlay(context, settings),
+        if (!_externalOnly) _buildControlOverlay(context),
       ],
     );
   }
 
   Widget _buildVideoSurface() {
-    switch (_activeEngine) {
-      case PlayerEngine.mediaKit:
-        final controller = _mediaKitController;
-        if (controller == null) return _buildPosterPlaceholder();
-        return media_video.Video(
-          controller: controller,
-          controls: null,
-          fit: BoxFit.contain,
-          fill: Colors.black,
-          pauseUponEnteringBackgroundMode: false,
-        );
-      case PlayerEngine.exo:
-        final controller = _exoController;
-        if (controller == null || !controller.value.isInitialized) {
-          return _buildPosterPlaceholder();
-        }
-        return Center(
-          child: AspectRatio(
-            aspectRatio: controller.value.aspectRatio,
-            child: exo.VideoPlayer(controller),
-          ),
-        );
-      case PlayerEngine.ijk:
-        final player = _ijkPlayer;
-        if (player == null) return _buildPosterPlaceholder();
-        return ijk.FijkView(
-          player: player,
-          fit: ijk.FijkFit.contain,
-          fs: false,
-          color: Colors.black,
-          panelBuilder: (_, __, ___, ____, _____) => const SizedBox.shrink(),
-        );
-    }
+    final controller = _mediaKitController;
+    if (controller == null) return _buildPosterPlaceholder();
+    return media_video.Video(
+      controller: controller,
+      controls: null,
+      fit: BoxFit.contain,
+      fill: Colors.black,
+      pauseUponEnteringBackgroundMode: false,
+    );
   }
 
   Widget _buildPosterPlaceholder() {
@@ -391,7 +359,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _buildControlOverlay(BuildContext context, AppSettings settings) {
+  Widget _buildControlOverlay(BuildContext context) {
     final progressMax = _duration.inMilliseconds <= 0
         ? 1.0
         : _duration.inMilliseconds.toDouble();
@@ -411,108 +379,157 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
             colors: [Color(0xDD000000), Color(0x00000000)],
           ),
         ),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(10, 28, 10, _isFullscreen ? 12 : 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  activeTrackColor: Colors.white,
-                  inactiveTrackColor: Colors.white24,
-                  thumbColor: Colors.white,
-                  overlayColor: Colors.white24,
+        child: SafeArea(
+          top: false,
+          minimum: const EdgeInsets.symmetric(horizontal: 4),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(10, 28, 10, _isFullscreen ? 10 : 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: Colors.white,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                    overlayColor: Colors.white24,
+                  ),
+                  child: Slider(
+                    min: 0,
+                    max: progressMax,
+                    value: progressValue,
+                    onChanged: (value) {
+                      setState(() {
+                        _position = Duration(milliseconds: value.round());
+                      });
+                    },
+                    onChangeEnd: (value) {
+                      unawaited(_seek(Duration(milliseconds: value.round())));
+                    },
+                  ),
                 ),
-                child: Slider(
-                  min: 0,
-                  max: progressMax,
-                  value: progressValue,
-                  onChanged: (value) {
-                    setState(() {
-                      _position = Duration(milliseconds: value.round());
-                    });
-                  },
-                  onChangeEnd: (value) {
-                    unawaited(_seek(Duration(milliseconds: value.round())));
-                  },
-                ),
-              ),
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: _isPlaying ? '暂停' : '播放',
-                    color: Colors.white,
-                    onPressed:
-                        _isLoading ? null : () => unawaited(_togglePlay()),
-                    icon: Icon(_isPlaying
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded),
-                  ),
-                  Text(
-                    '${_formatDuration(_position)} / ${_formatDuration(_duration)}',
-                    style: TextStyle(color: foreground, fontSize: 12),
-                  ),
-                  if (_isBuffering) ...[
-                    const SizedBox(width: 8),
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ],
-                  const Spacer(),
-                  Flexible(
-                    flex: 0,
-                    child: Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 2,
-                      runSpacing: 0,
-                      children: [
-                        _buildSpeedMenu(),
-                        _buildEngineMenu(settings),
-                        IconButton(
-                          tooltip: '下一集',
-                          color: Colors.white,
-                          onPressed:
-                              _hasNext ? () => unawaited(_playNext()) : null,
-                          icon: const Icon(Icons.skip_next_rounded),
-                        ),
-                        IconButton(
-                          tooltip: '外置播放器',
-                          color: Colors.white,
-                          onPressed: () => unawaited(_openExternalPlayer()),
-                          icon: const Icon(Icons.open_in_new_rounded),
-                        ),
-                        IconButton(
-                          tooltip: '画中画',
-                          color: Colors.white,
-                          onPressed: _bridge.supportsAndroidPlayerActions
-                              ? () => unawaited(_enterPictureInPicture())
-                              : null,
-                          icon:
-                              const Icon(Icons.picture_in_picture_alt_rounded),
-                        ),
-                        IconButton(
-                          tooltip: _isFullscreen ? '退出全屏' : '全屏',
-                          color: Colors.white,
-                          onPressed: () =>
-                              unawaited(_setFullscreen(!_isFullscreen)),
-                          icon: Icon(_isFullscreen
-                              ? Icons.fullscreen_exit_rounded
-                              : Icons.fullscreen_rounded),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                _buildTransportControls(foreground),
+              ],
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTransportControls(Color foreground) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 430;
+        final timeLabel = Text(
+          '${_formatDuration(_position)} / ${_formatDuration(_duration)}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: foreground, fontSize: 12),
+        );
+        final playButton = IconButton(
+          tooltip: _isPlaying ? '暂停' : '播放',
+          color: Colors.white,
+          onPressed: _isLoading ? null : () => unawaited(_togglePlay()),
+          icon:
+              Icon(_isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+        );
+        final actions = _buildActionButtons();
+
+        if (compact) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  playButton,
+                  Flexible(child: timeLabel),
+                  if (_isBuffering) ..._buildBufferingIndicator(),
+                ],
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _buildActionScroller(actions),
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            playButton,
+            Flexible(child: timeLabel),
+            if (_isBuffering) ..._buildBufferingIndicator(),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _buildActionScroller(actions),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  List<Widget> _buildBufferingIndicator() {
+    return const [
+      SizedBox(width: 8),
+      SizedBox(
+        width: 14,
+        height: 14,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: Colors.white,
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildActionScroller(Widget child) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      reverse: true,
+      child: child,
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildSpeedMenu(),
+        IconButton(
+          tooltip: '下一集',
+          color: Colors.white,
+          onPressed: _hasNext ? () => unawaited(_playNext()) : null,
+          icon: const Icon(Icons.skip_next_rounded),
+        ),
+        IconButton(
+          tooltip: '外置播放器',
+          color: Colors.white,
+          onPressed: () => unawaited(_openExternalPlayer()),
+          icon: const Icon(Icons.open_in_new_rounded),
+        ),
+        if (_bridge.supportsAndroidPlayerActions)
+          IconButton(
+            tooltip: '画中画',
+            color: Colors.white,
+            onPressed: () => unawaited(_enterPictureInPicture()),
+            icon: const Icon(Icons.picture_in_picture_alt_rounded),
+          ),
+        IconButton(
+          tooltip: _isFullscreen ? '退出全屏' : '全屏',
+          color: Colors.white,
+          onPressed: () => unawaited(_setFullscreen(!_isFullscreen)),
+          icon: Icon(
+            _isFullscreen
+                ? Icons.fullscreen_exit_rounded
+                : Icons.fullscreen_rounded,
+          ),
+        ),
+      ],
     );
   }
 
@@ -551,36 +568,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     );
   }
 
-  Widget _buildEngineMenu(AppSettings settings) {
-    return PopupMenuButton<PlayerEngine>(
-      tooltip: '内核',
-      onSelected: (value) => unawaited(_selectEngine(value)),
-      itemBuilder: (context) => [
-        for (final engine in PlayerEngine.values)
-          PopupMenuItem(
-            value: engine,
-            child: Row(
-              children: [
-                if (settings.playerEngine == engine)
-                  const Icon(Icons.check_rounded, size: 18)
-                else
-                  const SizedBox(width: 18),
-                const SizedBox(width: 8),
-                Text(_engineLabel(engine)),
-              ],
-            ),
-          ),
-      ],
-      child: const SizedBox(
-        height: 48,
-        width: 48,
-        child: Center(
-          child: Icon(Icons.memory_rounded, color: Colors.white),
-        ),
-      ),
-    );
-  }
-
   Widget _buildEpisodeBar(BuildContext context, AppSettings settings) {
     final source = sourceById(widget.sourceId);
     return DecoratedBox(
@@ -608,7 +595,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${source.name} · ${_engineLabel(_activeEngine)} · ${settings.autoPlayNext ? '自动下一集' : '手动下一集'}',
+                    '${source.name} · MediaKit · ${settings.autoPlayNext ? '自动下一集' : '手动下一集'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white60, fontSize: 12),
@@ -686,17 +673,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     await _disposePlaybackEngines();
     if (_disposed) return;
 
-    final requestedEngine = ref.read(settingsControllerProvider).playerEngine;
-    final engine = _effectiveEngine(requestedEngine);
-
     try {
       final resolved =
           await _resolveMedia(_currentPlayUrl, _currentPlayHeaders);
       if (_disposed) return;
       _activeMedia = resolved;
       _completionHandled = false;
-      _activeEngine = engine;
-      await _openWithEngine(engine, resolved);
+      await _openMediaKit(resolved);
       if (_disposed) return;
       if (mounted) {
         setState(() {
@@ -704,50 +687,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
           _error = null;
         });
       }
-      if (requestedEngine != engine) {
-        _showMessage('${_engineLabel(requestedEngine)} 当前平台不可用，已回退 MediaKit');
-      }
     } catch (error) {
-      if (engine != PlayerEngine.mediaKit && !_disposed) {
-        try {
-          await _disposePlaybackEngines();
-          final resolved = _activeMedia ??
-              await _resolveMedia(_currentPlayUrl, _currentPlayHeaders);
-          _activeMedia = resolved;
-          _activeEngine = PlayerEngine.mediaKit;
-          await _openWithEngine(PlayerEngine.mediaKit, resolved);
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _error = null;
-            });
-          }
-          _showMessage('${_engineLabel(engine)} 初始化失败，已回退 MediaKit');
-          return;
-        } catch (_) {
-          // Fall through and show the original error.
-        }
-      }
       if (mounted) {
         setState(() {
           _isLoading = false;
           _error = error.toString();
         });
       }
-    }
-  }
-
-  Future<void> _openWithEngine(
-    PlayerEngine engine,
-    _ResolvedMedia media,
-  ) async {
-    switch (engine) {
-      case PlayerEngine.mediaKit:
-        await _openMediaKit(media);
-      case PlayerEngine.exo:
-        await _openExo(media);
-      case PlayerEngine.ijk:
-        await _openIjk(media);
     }
   }
 
@@ -787,140 +733,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     await player.setRate(_rate);
   }
 
-  Future<void> _openExo(_ResolvedMedia media) async {
-    if (!Platform.isAndroid) {
-      throw StateError('Exo 仅支持 Android');
-    }
-    final controller = exo.VideoPlayerController.networkUrl(
-      Uri.parse(media.url),
-      httpHeaders: media.headers,
-      formatHint: _formatHint(media.url),
-      videoPlayerOptions: exo.VideoPlayerOptions(mixWithOthers: false),
-    );
-    _exoController = controller;
-    controller.addListener(_onExoValue);
-    await controller.initialize();
-    await controller.setPlaybackSpeed(_rate);
-    await controller.play();
-    _onExoValue();
-  }
-
-  Future<void> _openIjk(_ResolvedMedia media) async {
-    if (!Platform.isAndroid) {
-      throw StateError('Ijk 仅支持 Android');
-    }
-    final player = ijk.FijkPlayer();
-    _ijkPlayer = player;
-    player.addListener(_onIjkValue);
-    _ijkPositionSub = player.onCurrentPosUpdate.listen((value) {
-      if (mounted) setState(() => _position = value);
-    });
-    _ijkBufferingSub = player.onBufferStateUpdate.listen((value) {
-      if (mounted) setState(() => _isBuffering = value);
-    });
-    final headerText = _headersForIjk(media.headers);
-    if (headerText.isNotEmpty) {
-      await player.setOption(
-          ijk.FijkOption.formatCategory, 'headers', headerText);
-    }
-    await player.setDataSource(media.url, autoPlay: true);
-    await player.setSpeed(_rate);
-  }
-
-  void _onExoValue() {
-    final controller = _exoController;
-    if (controller == null || !mounted) return;
-    final value = controller.value;
-    setState(() {
-      _position = value.position;
-      _duration = value.duration;
-      _isPlaying = value.isPlaying;
-      _isBuffering = value.isBuffering;
-      _error = value.errorDescription;
-    });
-    if (value.isCompleted) {
-      unawaited(_handleCompleted());
-    }
-  }
-
-  void _onIjkValue() {
-    final player = _ijkPlayer;
-    if (player == null || !mounted) return;
-    final value = player.value;
-    setState(() {
-      _duration = value.duration;
-      _isPlaying = value.state == ijk.FijkState.started;
-      if (value.exception != ijk.FijkException.noException) {
-        _error = value.exception.toString();
-      }
-    });
-    if (value.state == ijk.FijkState.completed) {
-      unawaited(_handleCompleted());
-    }
-  }
-
   Future<void> _togglePlay() async {
-    switch (_activeEngine) {
-      case PlayerEngine.mediaKit:
-        final player = _mediaKitPlayer;
-        if (player == null) return;
-        if (_isPlaying) {
-          await player.pause();
-        } else {
-          await player.play();
-        }
-      case PlayerEngine.exo:
-        final controller = _exoController;
-        if (controller == null) return;
-        if (controller.value.isPlaying) {
-          await controller.pause();
-        } else {
-          await controller.play();
-        }
-        _onExoValue();
-      case PlayerEngine.ijk:
-        final player = _ijkPlayer;
-        if (player == null) return;
-        if (player.value.state == ijk.FijkState.started) {
-          await player.pause();
-        } else {
-          await player.start();
-        }
-        _onIjkValue();
+    final player = _mediaKitPlayer;
+    if (player == null) return;
+    if (_isPlaying) {
+      await player.pause();
+    } else {
+      await player.play();
     }
   }
 
   Future<void> _seek(Duration position) async {
-    switch (_activeEngine) {
-      case PlayerEngine.mediaKit:
-        await _mediaKitPlayer?.seek(position);
-      case PlayerEngine.exo:
-        await _exoController?.seekTo(position);
-      case PlayerEngine.ijk:
-        await _ijkPlayer?.seekTo(position.inMilliseconds);
-    }
+    await _mediaKitPlayer?.seek(position);
   }
 
   Future<void> _setRate(double rate) async {
     if (mounted) setState(() => _rate = rate);
     try {
-      switch (_activeEngine) {
-        case PlayerEngine.mediaKit:
-          await _mediaKitPlayer?.setRate(rate);
-        case PlayerEngine.exo:
-          await _exoController?.setPlaybackSpeed(rate);
-        case PlayerEngine.ijk:
-          await _ijkPlayer?.setSpeed(rate);
-      }
+      await _mediaKitPlayer?.setRate(rate);
     } catch (error) {
       _showMessage(error.toString());
     }
-  }
-
-  Future<void> _selectEngine(PlayerEngine engine) async {
-    await ref.read(settingsControllerProvider.notifier).setPlayerEngine(engine);
-    if (_externalOnly) return;
-    await _openCurrent();
   }
 
   Future<void> _playNext() async {
@@ -1013,17 +846,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   Future<void> _pauseForExternalPlayback() async {
     if (_externalOnly) return;
-    switch (_activeEngine) {
-      case PlayerEngine.mediaKit:
-        await _mediaKitPlayer?.pause();
-      case PlayerEngine.exo:
-        await _exoController?.pause();
-      case PlayerEngine.ijk:
-        final player = _ijkPlayer;
-        if (player != null && player.isPlayable()) {
-          await player.pause();
-        }
-    }
+    await _mediaKitPlayer?.pause();
   }
 
   Future<void> _enterPictureInPicture() async {
@@ -1037,6 +860,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   Future<void> _setFullscreen(bool value) async {
     if (_isFullscreen == value) return;
     if (mounted) setState(() => _isFullscreen = value);
+    if (_isDesktopPlatform) {
+      await windowManager.setFullScreen(value);
+      return;
+    }
     if (value) {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       if (Platform.isAndroid) {
@@ -1051,6 +878,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   Future<void> _restoreSystemUi() async {
+    if (_isDesktopPlatform) {
+      if (await windowManager.isFullScreen()) {
+        await windowManager.setFullScreen(false);
+      }
+      return;
+    }
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     await SystemChrome.setPreferredOrientations(const []);
   }
@@ -1133,24 +966,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     if (mediaKitPlayer != null) {
       await mediaKitPlayer.dispose();
     }
-
-    final exoController = _exoController;
-    _exoController = null;
-    if (exoController != null) {
-      exoController.removeListener(_onExoValue);
-      await exoController.dispose();
-    }
-
-    final ijkPlayer = _ijkPlayer;
-    _ijkPlayer = null;
-    await _ijkPositionSub?.cancel();
-    await _ijkBufferingSub?.cancel();
-    _ijkPositionSub = null;
-    _ijkBufferingSub = null;
-    if (ijkPlayer != null) {
-      ijkPlayer.removeListener(_onIjkValue);
-      await ijkPlayer.release();
-    }
   }
 
   Future<void> _saveHistory() async {
@@ -1199,24 +1014,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     return url.toLowerCase().contains('.mp4');
   }
 
-  PlayerEngine _effectiveEngine(PlayerEngine engine) {
-    if (engine == PlayerEngine.mediaKit) return engine;
-    return Platform.isAndroid ? engine : PlayerEngine.mediaKit;
-  }
-
-  exo.VideoFormat? _formatHint(String url) {
-    final lower = url.toLowerCase();
-    if (lower.contains('.m3u8')) return exo.VideoFormat.hls;
-    return null;
-  }
-
-  String _headersForIjk(Map<String, String> headers) {
-    if (headers.isEmpty) return '';
-    return headers.entries
-        .map((entry) => '${entry.key}: ${entry.value}')
-        .join('\r\n');
-  }
-
   void _normalizeEpisodeIndex() {
     if (_episodeIndex >= 0 && _episodeIndex < _episodes.length) return;
     _episodeIndex =
@@ -1238,6 +1035,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
     final playTitle = _currentPlayTitle.isEmpty ? '' : ' · $_currentPlayTitle';
     return '${widget.title}$episode$playTitle'.trim();
   }
+
+  bool get _isDesktopPlatform =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 }
 
 class _ResolvedMedia {
@@ -1266,14 +1066,6 @@ const _browserUserAgent =
     '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 const _playbackRates = [0.75, 1.0, 1.25, 1.5, 2.0];
-
-String _engineLabel(PlayerEngine engine) {
-  return switch (engine) {
-    PlayerEngine.mediaKit => 'MediaKit',
-    PlayerEngine.exo => 'Exo',
-    PlayerEngine.ijk => 'Ijk',
-  };
-}
 
 String _formatDuration(Duration duration) {
   final totalSeconds = duration.inSeconds;

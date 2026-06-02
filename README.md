@@ -23,7 +23,7 @@
 - 站点切换和站点状态标记
 - 搜索
 - 详情页、剧集和播放源列表
-- 播放器支持内置/外置播放；内置支持 MediaKit、Android ExoPlayer、Android IjkPlayer
+- 播放器支持内置/外置播放；内置使用 MediaKit
 - 播放控制支持倍速、全屏、下一集、自动下一集和 Android 画中画
 - 收藏
 - 播放历史与进度记录

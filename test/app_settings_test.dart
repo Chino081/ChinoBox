@@ -13,25 +13,22 @@ void main() {
       cacheEnabled: false,
       autoPlayNext: false,
       playerLaunchMode: PlayerLaunchMode.external,
-      playerEngine: PlayerEngine.ijk,
     );
 
     final decoded = AppSettings.fromJson(settings.toJson());
 
     expect(decoded.playerLaunchMode, PlayerLaunchMode.external);
-    expect(decoded.playerEngine, PlayerEngine.ijk);
     expect(decoded.autoPlayNext, isFalse);
     expect(decoded.themeMode, ThemeMode.dark);
   });
 
-  test('old settings default to built in MediaKit playback', () {
+  test('old settings default to built in playback', () {
     final settings = AppSettings.fromJson(const {
       'sourceId': 'libvio',
       'themeMode': 'light',
     });
 
     expect(settings.playerLaunchMode, PlayerLaunchMode.builtIn);
-    expect(settings.playerEngine, PlayerEngine.mediaKit);
     expect(settings.themeMode, ThemeMode.light);
   });
 }

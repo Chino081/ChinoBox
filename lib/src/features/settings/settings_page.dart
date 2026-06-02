@@ -159,32 +159,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ListTile(
                   leading: const Icon(Icons.memory_rounded),
                   title: const Text('内置播放内核'),
-                  subtitle: Text(_engineDescription(settings.playerEngine)),
-                  trailing: DropdownButton<PlayerEngine>(
-                    value: settings.playerEngine,
-                    underline: const SizedBox.shrink(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        ref
-                            .read(settingsControllerProvider.notifier)
-                            .setPlayerEngine(value);
-                      }
-                    },
-                    items: const [
-                      DropdownMenuItem(
-                        value: PlayerEngine.mediaKit,
-                        child: Text('MediaKit'),
-                      ),
-                      DropdownMenuItem(
-                        value: PlayerEngine.exo,
-                        child: Text('Exo'),
-                      ),
-                      DropdownMenuItem(
-                        value: PlayerEngine.ijk,
-                        child: Text('Ijk'),
-                      ),
-                    ],
-                  ),
+                  subtitle: const Text('MediaKit'),
+                  trailing: const Icon(Icons.check_rounded),
                 ),
                 SwitchListTile(
                   title: const Text('自动播放下一集'),
@@ -341,14 +317,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       ),
     );
   }
-}
-
-String _engineDescription(PlayerEngine engine) {
-  return switch (engine) {
-    PlayerEngine.mediaKit => '跨平台内置播放，Android 和 Windows 可用',
-    PlayerEngine.exo => 'Android ExoPlayer 内核，其他平台自动回退',
-    PlayerEngine.ijk => 'Android IjkPlayer 内核，其他平台自动回退',
-  };
 }
 
 class _SectionTitle extends StatelessWidget {
