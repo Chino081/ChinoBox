@@ -129,6 +129,7 @@ class SilisiliParser extends SiteParser {
         textOf(panel, 'div.widget-title'),
         '播放源 ${groups.length + 1}',
       ]);
+      if (_isHiddenPlaySource(name)) continue;
       final episodes = panel
           .querySelectorAll('ul li a')
           .map((a) {
@@ -273,4 +274,12 @@ class SilisiliParser extends SiteParser {
 
 String _cssImage(String value) {
   return RegExp(r'https?:[^) ;]+').firstMatch(value)?.group(0) ?? value;
+}
+
+bool _isHiddenPlaySource(String title) {
+  final normalized = cleanText(title).toLowerCase().replaceAll(
+        RegExp(r'\s+'),
+        '',
+      );
+  return normalized == 'no.s';
 }

@@ -2,6 +2,7 @@ import 'package:chinobox/src/core/network/movies_http_client.dart';
 import 'package:chinobox/src/features/content/data/parsers/girigirilove_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/iyinghua_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/libvio_parser.dart';
+import 'package:chinobox/src/features/content/data/parsers/silisili_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/tbys_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/yjys_parser.dart';
 import 'package:chinobox/src/features/content/data/site_parser.dart';
@@ -140,6 +141,44 @@ void main() {
       );
 
       expect(imageUrl, 'https://ani.girigirilove.com/verify/index.html');
+    });
+  });
+
+  group('SilisiliParser', () {
+    test('only hides unavailable No.S play source', () {
+      final parser = SilisiliParser();
+      final detail = parser.parseDetail(
+        html_parser.parse('''
+          <h1 class="entry-title">Test Anime</h1>
+          <div class="play-pannel-box">
+            <div class="widget-title">No.S</div>
+            <ul><li><a href="/vodplay/test/2/1/">01</a></li></ul>
+          </div>
+          <div class="play-pannel-box">
+            <div class="widget-title">No.X</div>
+            <ul><li><a href="/vodplay/test/4/1/">01</a></li></ul>
+          </div>
+          <div class="play-pannel-box">
+            <div class="widget-title">NO.M</div>
+            <ul><li><a href="/vodplay/test/5/1/">01</a></li></ul>
+          </div>
+          <div class="play-pannel-box">
+            <div class="widget-title">NO.F</div>
+            <ul><li><a href="/vodplay/test/3/1/">01</a></li></ul>
+          </div>
+          <div class="play-pannel-box">
+            <div class="widget-title">No.L</div>
+            <ul><li><a href="/vodplay/test/1/1/">01</a></li></ul>
+          </div>
+        '''),
+        AppSettings.defaults(),
+        '/voddetail/test/',
+      );
+
+      expect(
+        detail.groups.map((group) => group.title),
+        ['No.X', 'NO.M', 'NO.F', 'No.L'],
+      );
     });
   });
 
