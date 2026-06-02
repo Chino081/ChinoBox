@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../content/data/content_repository.dart';
+import '../settings/app_settings.dart';
 import '../settings/settings_controller.dart';
 import '../source/domain/source_catalog.dart';
 
@@ -119,6 +120,84 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
             ),
           ),
+          _SectionTitle('播放器'),
+          Card(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.play_circle_outline_rounded),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: SegmentedButton<PlayerLaunchMode>(
+                          showSelectedIcon: false,
+                          segments: const [
+                            ButtonSegment(
+                              value: PlayerLaunchMode.builtIn,
+                              label: Text('内置'),
+                              icon: Icon(Icons.smart_display_rounded),
+                            ),
+                            ButtonSegment(
+                              value: PlayerLaunchMode.external,
+                              label: Text('外置'),
+                              icon: Icon(Icons.open_in_new_rounded),
+                            ),
+                          ],
+                          selected: {settings.playerLaunchMode},
+                          onSelectionChanged: (selected) {
+                            ref
+                                .read(settingsControllerProvider.notifier)
+                                .setPlayerLaunchMode(selected.single);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.memory_rounded),
+                  title: const Text('内置播放内核'),
+                  subtitle: Text(_engineDescription(settings.playerEngine)),
+                  trailing: DropdownButton<PlayerEngine>(
+                    value: settings.playerEngine,
+                    underline: const SizedBox.shrink(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        ref
+                            .read(settingsControllerProvider.notifier)
+                            .setPlayerEngine(value);
+                      }
+                    },
+                    items: const [
+                      DropdownMenuItem(
+                        value: PlayerEngine.mediaKit,
+                        child: Text('MediaKit'),
+                      ),
+                      DropdownMenuItem(
+                        value: PlayerEngine.exo,
+                        child: Text('Exo'),
+                      ),
+                      DropdownMenuItem(
+                        value: PlayerEngine.ijk,
+                        child: Text('Ijk'),
+                      ),
+                    ],
+                  ),
+                ),
+                SwitchListTile(
+                  title: const Text('自动播放下一集'),
+                  value: settings.autoPlayNext,
+                  onChanged: (value) {
+                    ref
+                        .read(settingsControllerProvider.notifier)
+                        .setAutoPlayNext(value);
+                  },
+                ),
+              ],
+            ),
+          ),
           _SectionTitle('当前站点'),
           Card(
             child: Column(
@@ -205,20 +284,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         .setCacheEnabled(value);
                   },
                 ),
-                SwitchListTile(
-                  title: const Text('自动播放下一集'),
-                  value: settings.autoPlayNext,
-                  onChanged: (value) {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .setAutoPlayNext(value);
-                  },
-                ),
                 ListTile(
                   leading: const Icon(Icons.palette_outlined),
                   title: const Text('主题'),
                   trailing: DropdownButton<ThemeMode>(
                     value: settings.themeMode,
+                    underline: const SizedBox.shrink(),
                     onChanged: (value) {
                       if (value != null) {
                         ref
@@ -228,11 +299,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     },
                     items: const [
                       DropdownMenuItem(
-                          value: ThemeMode.system, child: Text('跟随系统')),
+                        value: ThemeMode.system,
+                        child: Text('跟随系统'),
+                      ),
                       DropdownMenuItem(
-                          value: ThemeMode.light, child: Text('明亮')),
+                        value: ThemeMode.light,
+                        child: Text('明亮'),
+                      ),
                       DropdownMenuItem(
-                          value: ThemeMode.dark, child: Text('黑暗')),
+                        value: ThemeMode.dark,
+                        child: Text('暗色'),
+                      ),
                     ],
                   ),
                 ),
@@ -264,6 +341,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       ),
     );
   }
+}
+
+String _engineDescription(PlayerEngine engine) {
+  return switch (engine) {
+    PlayerEngine.mediaKit => '跨平台内置播放，Android 和 Windows 可用',
+    PlayerEngine.exo => 'Android ExoPlayer 内核，其他平台自动回退',
+    PlayerEngine.ijk => 'Android IjkPlayer 内核，其他平台自动回退',
+  };
 }
 
 class _SectionTitle extends StatelessWidget {

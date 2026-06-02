@@ -284,12 +284,13 @@ class _EpisodeGroupView extends ConsumerWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final episode in group.episodes)
+                for (var index = 0; index < group.episodes.length; index++)
                   OutlinedButton(
                     onPressed: () async {
-                      await _openEpisode(context, ref, episode);
+                      await _openEpisode(context, ref, group.episodes[index],
+                          episodeIndex: index);
                     },
-                    child: Text(episode.title,
+                    child: Text(group.episodes[index].title,
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
               ],
@@ -301,7 +302,11 @@ class _EpisodeGroupView extends ConsumerWidget {
   }
 
   Future<void> _openEpisode(
-      BuildContext context, WidgetRef ref, Episode episode) async {
+    BuildContext context,
+    WidgetRef ref,
+    Episode episode, {
+    required int episodeIndex,
+  }) async {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -314,7 +319,7 @@ class _EpisodeGroupView extends ConsumerWidget {
       if (context.mounted) Navigator.of(context).pop();
       if (!context.mounted) return;
       if (items.length == 1) {
-        context.push(_locationFor(episode, items.first));
+        context.push(_locationFor(episode, episodeIndex, items.first));
         return;
       }
       await showModalBottomSheet<void>(
@@ -332,7 +337,7 @@ class _EpisodeGroupView extends ConsumerWidget {
               subtitle: Text(item.type.name.toUpperCase()),
               onTap: () {
                 Navigator.of(context).pop();
-                context.push(_locationFor(episode, item));
+                context.push(_locationFor(episode, episodeIndex, item));
               },
             );
           },
@@ -347,7 +352,7 @@ class _EpisodeGroupView extends ConsumerWidget {
     }
   }
 
-  String _locationFor(Episode episode, PlayItem play) {
+  String _locationFor(Episode episode, int episodeIndex, PlayItem play) {
     return playerLocation({
       'source': sourceId,
       'title': detail.title,
@@ -356,10 +361,23 @@ class _EpisodeGroupView extends ConsumerWidget {
       'episodeTitle': episode.title,
       'episodeUrl': episode.url,
       'playUrl': play.url,
+      'playTitle': play.title,
+      'episodeIndex': episodeIndex.toString(),
+      'episodes': _encodeEpisodeList(group.episodes),
       if (play.headers.isNotEmpty)
         'playHeaders': base64Url.encode(utf8.encode(jsonEncode(play.headers))),
     });
   }
+}
+
+String _encodeEpisodeList(List<Episode> episodes) {
+  final json = episodes
+      .map((episode) => {
+            'title': episode.title,
+            'url': episode.url,
+          })
+      .toList();
+  return base64Url.encode(utf8.encode(jsonEncode(json)));
 }
 
 class _DetailError extends StatelessWidget {

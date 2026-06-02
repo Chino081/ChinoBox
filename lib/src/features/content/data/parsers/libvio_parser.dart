@@ -8,6 +8,7 @@ import '../../../settings/app_settings.dart';
 import '../../../source/domain/source_catalog.dart';
 import '../../domain/content_models.dart';
 import '../html_helpers.dart';
+import '../site_parser.dart';
 import 'generic_maccms_parser.dart';
 
 class LibvioParser extends GenericMaccmsParser {
@@ -44,31 +45,102 @@ class LibvioParser extends GenericMaccmsParser {
     if (direct.isNotEmpty) return direct;
 
     final playerData = _playerDataFromHtml(body);
-    if (playerData == null || playerData.from != 'yd189') return const [];
-
-    final base = domain(settings);
-    final iframeUrl = Uri.parse('$base/vid/yd.php').replace(
-      queryParameters: {
-        'url': playerData.url,
-        if (playerData.linkNext.isNotEmpty) 'next': playerData.linkNext,
-        if (playerData.id.isNotEmpty) 'id': playerData.id,
-        if (playerData.nid.isNotEmpty) 'nid': playerData.nid,
-      },
-    ).toString();
-    final iframeBody = await client.getText(
-      iframeUrl,
-      headers: {
-        ...requestHeaders(settings),
-        'Referer': resolved,
-      },
+    if (playerData == null) return const [];
+    final iframe = await _loadIframePlayItems(
+      client,
+      settings,
+      playerData,
+      referer: resolved,
     );
-    final parsePath = RegExp(
-      r'''fetch\(\s*['"]([^'"]*parse_yd\.php[^'"]*)['"]\s*,''',
-      caseSensitive: false,
-    ).firstMatch(iframeBody)?.group(1);
+    if (iframe.isNotEmpty) return iframe;
+
+    return const [];
+  }
+
+  Future<List<PlayItem>> _loadIframePlayItems(
+    MoviesHttpClient client,
+    AppSettings settings,
+    _LibvioPlayerData playerData, {
+    required String referer,
+  }) async {
+    final knownPaths = _knownIframePaths(playerData.from);
+    final firstPaths = knownPaths.isNotEmpty
+        ? [
+            ...knownPaths,
+            if (playerData.from.isNotEmpty) '/vid/${playerData.from}.php',
+          ]
+        : await _scriptIframePaths(client, settings, playerData.from);
+    final first = await _loadIframeUrls(
+      client,
+      settings,
+      playerData,
+      firstPaths,
+      referer: referer,
+    );
+    if (first.isNotEmpty) return first;
+
+    final fallbackPaths = knownPaths.isNotEmpty
+        ? await _scriptIframePaths(client, settings, playerData.from)
+        : [
+            if (playerData.from.isNotEmpty) '/vid/${playerData.from}.php',
+          ];
+    return _loadIframeUrls(
+      client,
+      settings,
+      playerData,
+      fallbackPaths,
+      referer: referer,
+    );
+  }
+
+  Future<List<PlayItem>> _loadIframeUrls(
+    MoviesHttpClient client,
+    AppSettings settings,
+    _LibvioPlayerData playerData,
+    List<String> paths, {
+    required String referer,
+  }) async {
+    final iframeUrls = _iframeUrlsFromPaths(paths, settings, playerData);
+
+    for (final iframeUrl in iframeUrls) {
+      String iframeBody;
+      try {
+        iframeBody = await client.getText(
+          iframeUrl,
+          headers: {
+            ...requestHeaders(settings),
+            'Referer': referer,
+          },
+        );
+      } catch (_) {
+        continue;
+      }
+
+      final normalizedBody = iframeBody.replaceAll(r'\/', '/');
+      try {
+        final parseItems =
+            await _loadParseResponsePlayItems(client, settings, normalizedBody);
+        if (parseItems.isNotEmpty) return parseItems;
+      } catch (_) {}
+
+      final direct = extractDirectPlayItems(
+        normalizedBody,
+        headers: playerHeaders(settings),
+      );
+      if (direct.isNotEmpty) return direct;
+    }
+    return const [];
+  }
+
+  Future<List<PlayItem>> _loadParseResponsePlayItems(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String iframeBody,
+  ) async {
+    final parsePath = _parsePathFromIframe(iframeBody);
     if (parsePath == null || parsePath.isEmpty) return const [];
 
-    final parseUrl = absolutize(parsePath, base);
+    final parseUrl = absolutize(parsePath, domain(settings));
     final jsonBody = await client.getText(parseUrl, headers: const {
       'Accept': '*/*',
       'Cache-Control': 'no-cache',
@@ -77,15 +149,100 @@ class LibvioParser extends GenericMaccmsParser {
       'Sec-Fetch-Mode': 'cors',
       'Sec-Fetch-Site': 'same-origin',
     });
-    final url = _urlFromParseResponse(jsonBody);
-    if (url == null || url.isEmpty) return const [];
+    return _playItemsFromParseResponse(jsonBody);
+  }
 
-    return [
-      PlayItem(
-        url: url,
-        type: _playTypeFor(url),
-      ),
-    ];
+  String? _parsePathFromIframe(String iframeBody) {
+    final paths = RegExp(
+      r'''['"]([^'"]*parse_[^'"]+?\.php[^'"]*)['"]''',
+      caseSensitive: false,
+    )
+        .allMatches(iframeBody)
+        .map((match) => match.group(1) ?? '')
+        .where((path) => path.isNotEmpty)
+        .toList();
+    if (paths.isEmpty) return null;
+
+    bool looksComplete(String path) {
+      final lower = path.toLowerCase();
+      return lower.contains('token=') ||
+          lower.contains('_t=') ||
+          lower.contains('exp=') ||
+          lower.contains('sig=') ||
+          lower.contains('url=');
+    }
+
+    for (final path in paths) {
+      if (looksComplete(path)) return path;
+    }
+    return paths.last;
+  }
+
+  List<String> _iframeUrlsFromPaths(
+    List<String> paths,
+    AppSettings settings,
+    _LibvioPlayerData playerData,
+  ) {
+    final urls = <String>[];
+    final seen = <String>{};
+    for (final path in paths) {
+      final url = _iframeUrl(path, settings, playerData);
+      if (url.isNotEmpty && seen.add(url)) urls.add(url);
+    }
+    return urls;
+  }
+
+  List<String> _knownIframePaths(String from) {
+    return switch (from) {
+      'yd189' => const ['/vid/yd.php'],
+      'vr2' => const ['/vid/plyr/vr2.php'],
+      'qq' => const ['/vid/qq.php'],
+      'ffm3u8' => const ['/vid/ffm3u8.php'],
+      _ => const [],
+    };
+  }
+
+  Future<List<String>> _scriptIframePaths(
+    MoviesHttpClient client,
+    AppSettings settings,
+    String from,
+  ) async {
+    if (from.isEmpty) return const [];
+    final scriptUrl =
+        absolutize('/static/player/$from.js?v=3.9', domain(settings));
+    String body;
+    try {
+      body = await client.getText(
+        scriptUrl,
+        headers: requestHeaders(settings),
+      );
+    } catch (_) {
+      return const [];
+    }
+    return RegExp(
+      r'''src=["']([^"']+?\.php)\?''',
+      caseSensitive: false,
+    )
+        .allMatches(body)
+        .map((match) => match.group(1) ?? '')
+        .where((path) => path.isNotEmpty)
+        .toList();
+  }
+
+  String _iframeUrl(
+    String path,
+    AppSettings settings,
+    _LibvioPlayerData playerData,
+  ) {
+    if (path.isEmpty) return '';
+    return Uri.parse(absolutize(path, domain(settings))).replace(
+      queryParameters: {
+        'url': playerData.url,
+        if (playerData.linkNext.isNotEmpty) 'next': playerData.linkNext,
+        if (playerData.id.isNotEmpty) 'id': playerData.id,
+        if (playerData.nid.isNotEmpty) 'nid': playerData.nid,
+      },
+    ).toString();
   }
 
   @override
@@ -270,16 +427,68 @@ class LibvioParser extends GenericMaccmsParser {
     );
   }
 
-  String? _urlFromParseResponse(String jsonBody) {
+  List<PlayItem> _playItemsFromParseResponse(String jsonBody) {
+    final urls = <String>{};
     Object? decoded;
     try {
       decoded = jsonDecode(jsonBody);
     } catch (_) {
       decoded = null;
     }
-    if (decoded is! Map<String, dynamic>) return null;
-    final url = decoded['url']?.toString().replaceAll(r'\/', '/') ?? '';
-    return url.startsWith('http') ? url : null;
+
+    void addValue(Object? value) {
+      if (value == null) return;
+      if (value is Map) {
+        for (final item in value.values) {
+          addValue(item);
+        }
+        return;
+      }
+      if (value is Iterable) {
+        for (final item in value) {
+          addValue(item);
+        }
+        return;
+      }
+      final text = value.toString().replaceAll(r'\/', '/');
+      for (final part in text.split(',')) {
+        final url = _cleanParseUrl(part);
+        if (_looksPlayableUrl(url)) urls.add(url);
+      }
+    }
+
+    if (decoded is Map<String, dynamic>) {
+      for (final key in const ['url', 'data', 'm3u8', 'playurl']) {
+        addValue(decoded[key]);
+      }
+    } else {
+      for (final item in extractDirectPlayItems(
+        jsonBody.replaceAll(r'\/', '/'),
+      )) {
+        addValue(item.url);
+      }
+    }
+
+    return urls
+        .map((url) => PlayItem(
+              url: url,
+              type: _playTypeFor(url),
+            ))
+        .toList();
+  }
+
+  String _cleanParseUrl(String value) {
+    var cleaned = value.trim();
+    if (!cleaned.startsWith('http') && cleaned.contains(r'$')) {
+      cleaned = cleaned.substring(cleaned.lastIndexOf(r'$') + 1);
+    }
+    return cleaned.split('#').first.trim();
+  }
+
+  bool _looksPlayableUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.startsWith('http') &&
+        (lower.contains('.m3u8') || lower.contains('.mp4'));
   }
 
   String _decodeMacPlayerValue(String value, int encrypt) {

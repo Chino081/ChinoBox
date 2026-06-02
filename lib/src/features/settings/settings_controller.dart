@@ -55,6 +55,14 @@ class SettingsController extends StateNotifier<AppSettings> {
     return _save(state.copyWith(autoPlayNext: value));
   }
 
+  Future<void> setPlayerLaunchMode(PlayerLaunchMode value) {
+    return _save(state.copyWith(playerLaunchMode: value));
+  }
+
+  Future<void> setPlayerEngine(PlayerEngine value) {
+    return _save(state.copyWith(playerEngine: value));
+  }
+
   Future<void> setSourceDomain(String sourceId, String domain) {
     final domains = Map<String, String>.from(state.userDomains);
     if (domain.trim().isEmpty) {

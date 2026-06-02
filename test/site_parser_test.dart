@@ -223,6 +223,8 @@ void main() {
         ''',
         iframeUrl: '''
           <script>
+          window.adUrl = "https:\\/\\/ad.example.com\\/buffer.m3u8";
+          var refreshUrl = '/vid/parse_yd.php?_r=';
           fetch('/vid/parse_yd.php?token=ok', {cache:'no-store'})
           </script>
         ''',
@@ -234,6 +236,79 @@ void main() {
       expect(items, hasLength(1));
       expect(items.single.url, 'https://cdn.example.com/video.mp4');
       expect(items.single.type, PlayType.mp4);
+      final parseRequest =
+          client.requests.singleWhere((request) => request.url == parseUrl);
+      expect(parseRequest.headers.containsKey('Referer'), isFalse);
+    });
+
+    test('resolves qq iframe direct play urls', () async {
+      final parser = LibvioParser();
+      final settings = AppSettings.defaults();
+      final episodeUrl = 'https://www.libvio.run/w/1-5-1.html';
+      final iframeUrl = Uri.parse('https://www.libvio.run/vid/qq.php').replace(
+        queryParameters: {
+          'url': 'qq-token',
+          'next': '/w/1-5-2.html',
+          'id': '1',
+          'nid': '1',
+        },
+      ).toString();
+      final client = _FakeMoviesHttpClient({
+        episodeUrl: '''
+          <script>
+          var player_aaaa = {"encrypt":3,"url":"qq-token",
+            "link_next":"\\/w\\/1-5-2.html","from":"qq",
+            "id":"1","nid":1};
+          </script>
+        ''',
+        iframeUrl: '''
+          <script>
+          window.playUrl = "https:\\/\\/cdn.example.com\\/video.m3u8";
+          </script>
+        ''',
+      });
+
+      final items = await parser.loadPlayItems(client, settings, episodeUrl);
+
+      expect(items, hasLength(1));
+      expect(items.single.url, 'https://cdn.example.com/video.m3u8');
+      expect(items.single.type, PlayType.m3u8);
+      expect(items.single.headers['Referer'], 'https://www.libvio.run/');
+    });
+
+    test('resolves ffm3u8 iframe parse responses', () async {
+      final parser = LibvioParser();
+      final settings = AppSettings.defaults();
+      final episodeUrl = 'https://www.libvio.run/w/1-6-1.html';
+      final iframeUrl =
+          Uri.parse('https://www.libvio.run/vid/ffm3u8.php').replace(
+        queryParameters: {
+          'url': 'stream-token',
+          'id': '1',
+          'nid': '1',
+        },
+      ).toString();
+      const parseUrl = 'https://www.libvio.run/vid/parse_ffm3u8.php?token=ok';
+      final client = _FakeMoviesHttpClient({
+        episodeUrl: '''
+          <script>
+          var player_aaaa = {"encrypt":3,"url":"stream-token",
+            "link_next":"","from":"ffm3u8","id":"1","nid":1};
+          </script>
+        ''',
+        iframeUrl: '''
+          <script>
+          fetch('/vid/parse_ffm3u8.php?token=ok', {cache:'no-store'})
+          </script>
+        ''',
+        parseUrl: '{"url":"https:\\/\\/cdn.example.com\\/stream.m3u8"}',
+      });
+
+      final items = await parser.loadPlayItems(client, settings, episodeUrl);
+
+      expect(items, hasLength(1));
+      expect(items.single.url, 'https://cdn.example.com/stream.m3u8');
+      expect(items.single.type, PlayType.m3u8);
       final parseRequest =
           client.requests.singleWhere((request) => request.url == parseUrl);
       expect(parseRequest.headers.containsKey('Referer'), isFalse);

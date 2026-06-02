@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../source/domain/source_catalog.dart';
 
+enum PlayerLaunchMode { builtIn, external }
+
+enum PlayerEngine { mediaKit, exo, ijk }
+
 class AppSettings {
   const AppSettings({
     required this.sourceId,
@@ -11,6 +15,8 @@ class AppSettings {
     required this.themeMode,
     required this.cacheEnabled,
     required this.autoPlayNext,
+    required this.playerLaunchMode,
+    required this.playerEngine,
   });
 
   factory AppSettings.defaults() {
@@ -22,6 +28,8 @@ class AppSettings {
       themeMode: ThemeMode.system,
       cacheEnabled: true,
       autoPlayNext: true,
+      playerLaunchMode: PlayerLaunchMode.builtIn,
+      playerEngine: PlayerEngine.mediaKit,
     );
   }
 
@@ -39,6 +47,16 @@ class AppSettings {
       ),
       cacheEnabled: json['cacheEnabled'] as bool? ?? true,
       autoPlayNext: json['autoPlayNext'] as bool? ?? true,
+      playerLaunchMode: _enumByName(
+        PlayerLaunchMode.values,
+        json['playerLaunchMode'] as String?,
+        PlayerLaunchMode.builtIn,
+      ),
+      playerEngine: _enumByName(
+        PlayerEngine.values,
+        json['playerEngine'] as String?,
+        PlayerEngine.mediaKit,
+      ),
     );
   }
 
@@ -49,6 +67,8 @@ class AppSettings {
   final ThemeMode themeMode;
   final bool cacheEnabled;
   final bool autoPlayNext;
+  final PlayerLaunchMode playerLaunchMode;
+  final PlayerEngine playerEngine;
 
   Map<String, dynamic> toJson() {
     return {
@@ -59,6 +79,8 @@ class AppSettings {
       'themeMode': themeMode.name,
       'cacheEnabled': cacheEnabled,
       'autoPlayNext': autoPlayNext,
+      'playerLaunchMode': playerLaunchMode.name,
+      'playerEngine': playerEngine.name,
     };
   }
 
@@ -70,6 +92,8 @@ class AppSettings {
     ThemeMode? themeMode,
     bool? cacheEnabled,
     bool? autoPlayNext,
+    PlayerLaunchMode? playerLaunchMode,
+    PlayerEngine? playerEngine,
   }) {
     return AppSettings(
       sourceId: sourceId ?? this.sourceId,
@@ -79,6 +103,15 @@ class AppSettings {
       themeMode: themeMode ?? this.themeMode,
       cacheEnabled: cacheEnabled ?? this.cacheEnabled,
       autoPlayNext: autoPlayNext ?? this.autoPlayNext,
+      playerLaunchMode: playerLaunchMode ?? this.playerLaunchMode,
+      playerEngine: playerEngine ?? this.playerEngine,
     );
   }
+}
+
+T _enumByName<T extends Enum>(List<T> values, String? name, T fallback) {
+  for (final value in values) {
+    if (value.name == name) return value;
+  }
+  return fallback;
 }

@@ -23,7 +23,8 @@
 - 站点切换和站点状态标记
 - 搜索
 - 详情页、剧集和播放源列表
-- 使用 `media_kit` 播放公开直链 `m3u8/mp4`
+- 播放器支持内置/外置播放；内置支持 MediaKit、Android ExoPlayer、Android IjkPlayer
+- 播放控制支持倍速、全屏、下一集、自动下一集和 Android 画中画
 - 收藏
 - 播放历史与进度记录
 - 本地页面缓存
@@ -50,7 +51,7 @@
 
 ## 运行
 
-本机已验证 Flutter 3.44.0、Android SDK 36、Windows Build Tools 2022 可用。
+本机已验证 Flutter 3.44.0、JDK 21、Android SDK 36、Windows Build Tools 2022 可用。
 
 ```powershell
 flutter pub get
