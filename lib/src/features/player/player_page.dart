@@ -945,6 +945,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     final controller = media_video.VideoController(player);
     _mediaKitPlayer = player;
     _mediaKitController = controller;
+
+    // Wait for stream to be ready before seeking
+    final durationReady = Completer<void>();
+    final seekTo = _pendingSeek;
+    _pendingSeek = null;
+
     _mediaKitSubscriptions
       ..clear()
       ..add(player.stream.position.listen((value) {
@@ -952,6 +958,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
       }))
       ..add(player.stream.duration.listen((value) {
         if (mounted) setState(() => _duration = value);
+        if (!durationReady.isCompleted && value > Duration.zero) {
+          durationReady.complete();
+        }
       }))
       ..add(player.stream.playing.listen((value) {
         if (mounted) setState(() => _isPlaying = value);
@@ -975,15 +984,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     );
     await player.setRate(_rate);
 
-    // Restore saved playback position
-    final seekTo = _pendingSeek;
-    _pendingSeek = null;
+    // Restore saved playback position after stream is ready
     if (seekTo != null && seekTo > Duration.zero) {
-      // Wait a moment for the stream to buffer before seeking
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (!_disposed && _mediaKitPlayer != null) {
-        await player.seek(seekTo);
-      }
+      try {
+        await durationReady.future.timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {},
+        );
+        if (!_disposed && _mediaKitPlayer != null) {
+          await player.seek(seekTo);
+        }
+      } catch (_) {}
     }
   }
 
