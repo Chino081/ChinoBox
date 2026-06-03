@@ -28,6 +28,7 @@ abstract class SiteParser {
   List<CategoryGroup> get categories => const [];
 
   bool get supportsDirectPlay => true;
+  bool get needsProxy => true;
 
   String homeUrl(AppSettings settings) => domain(settings);
 

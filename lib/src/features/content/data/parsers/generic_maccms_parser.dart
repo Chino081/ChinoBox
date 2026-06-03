@@ -19,6 +19,9 @@ class GenericMaccmsParser extends SiteParser {
   final String itemSelector;
 
   @override
+  bool get needsProxy => false;
+
+  @override
   Map<String, String> requestHeaders(AppSettings settings) => {
         'Referer': domain(settings),
       };

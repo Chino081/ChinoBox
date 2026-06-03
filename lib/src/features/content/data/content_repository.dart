@@ -26,11 +26,15 @@ class ContentRepository {
     required this.settings,
     required this.store,
     required this.client,
-  });
+  }) : _directClient = MoviesHttpClient(settings, noProxy: true);
 
   final AppSettings settings;
   final LocalStore store;
   final MoviesHttpClient client;
+  final MoviesHttpClient _directClient;
+
+  MoviesHttpClient clientFor(SiteParser parser) =>
+      parser.needsProxy ? client : _directClient;
 
   SiteParser parserFor([String? sourceId]) {
     return ParserRegistry.byId(sourceId ?? settings.sourceId);
@@ -79,7 +83,7 @@ class ContentRepository {
       body = await _fetch(url, parser, useCache: false);
     } else {
       final verifiedBody = await parser.loadVerifiedSearchBody(
-        client,
+        clientFor(parser),
         settings,
         query,
         page,
@@ -95,7 +99,7 @@ class ContentRepository {
     final document = html_parser.parse(body);
     final captchaUrl = parser.searchCaptchaImageUrl(document, settings, url);
     if (captchaUrl != null) {
-      final imageBytes = await client.getBytes(
+      final imageBytes = await clientFor(parser).getBytes(
         captchaUrl,
         headers: {
           ...parser.requestHeaders(settings),
@@ -134,7 +138,7 @@ class ContentRepository {
 
   Future<List<PlayItem>> playItems(String sourceId, String episodeUrl) async {
     final parser = parserFor(sourceId);
-    final items = await parser.loadPlayItems(client, settings, episodeUrl);
+    final items = await parser.loadPlayItems(clientFor(parser), settings, episodeUrl);
     if (items.isEmpty) {
       throw AppError('未找到可直接播放的公开视频地址');
     }
@@ -204,7 +208,7 @@ class ContentRepository {
       if (cached != null) return cached;
     }
     final body =
-        await client.getText(url, headers: parser.requestHeaders(settings));
+        await clientFor(parser).getText(url, headers: parser.requestHeaders(settings));
     if (useCache && settings.cacheEnabled && body.isNotEmpty) {
       await store.writeCache(key, body);
     }

@@ -17,6 +17,9 @@ class YjysParser extends SiteParser {
   YjysParser() : super(sourceById('yjys'));
 
   @override
+  bool get needsProxy => false;
+
+  @override
   List<CategoryGroup> get categories => const [
         CategoryGroup(
           title: '频道',

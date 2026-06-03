@@ -10,6 +10,13 @@ class PlaybackProxy {
   var _nextId = 0;
   final _entries = <String, _ProxyEntry>{};
 
+  Uri? _proxy;
+
+  /// Update the upstream proxy used for fetching media.
+  void updateProxy(Uri? proxy) {
+    _proxy = proxy;
+  }
+
   Future<String> proxiedUrl(
     String targetUrl,
     Map<String, String> headers,
@@ -55,6 +62,7 @@ class PlaybackProxy {
 
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 12);
+    _applyProxy(client);
     try {
       final upstream =
           await client.openUrl(request.method, Uri.parse(entry.url));
@@ -104,6 +112,44 @@ class PlaybackProxy {
       }
     } finally {
       client.close(force: true);
+    }
+  }
+
+  void _applyProxy(HttpClient client) {
+    final proxy = _proxy;
+    if (proxy == null) return;
+
+    final scheme = proxy.scheme.toLowerCase();
+    final host = proxy.host;
+    final port = proxy.hasPort
+        ? proxy.port
+        : (scheme.startsWith('socks') ? 1080 : 8080);
+    client.findProxy = (uri) {
+      if (scheme.startsWith('socks')) {
+        return 'SOCKS $host:$port';
+      }
+      return 'PROXY $host:$port';
+    };
+
+    if (proxy.userInfo.isNotEmpty) {
+      final parts = proxy.userInfo.split(':');
+      final user = Uri.decodeComponent(parts.first);
+      final password = Uri.decodeComponent(
+          parts.length > 1 ? parts.sublist(1).join(':') : '');
+      client.authenticateProxy = (
+        String host,
+        int port,
+        String scheme,
+        String? realm,
+      ) async {
+        client.addProxyCredentials(
+          host,
+          port,
+          realm ?? '',
+          HttpClientBasicCredentials(user, password),
+        );
+        return true;
+      };
     }
   }
 

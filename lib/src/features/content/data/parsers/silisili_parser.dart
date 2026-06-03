@@ -11,6 +11,9 @@ import '../site_parser.dart';
 class SilisiliParser extends SiteParser {
   SilisiliParser() : super(sourceById('silisili'));
 
+  @override
+  bool get needsProxy => false;
+
   static const _defaultAccessCookie = String.fromEnvironment(
     'MOVIESBOX_SILISILI_COOKIE',
     defaultValue: 'silisili=on;path=/;max-age=86400',

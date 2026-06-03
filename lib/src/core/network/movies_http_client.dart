@@ -10,8 +10,8 @@ import '../app_error.dart';
 import '../logging/app_logger.dart';
 
 class MoviesHttpClient {
-  MoviesHttpClient(this.settings) {
-    final proxy = _proxyFromSettings(settings);
+  MoviesHttpClient(this.settings, {this.noProxy = false}) {
+    final proxy = noProxy ? null : proxyFromSettings(settings);
     _dio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 12),
@@ -56,6 +56,7 @@ class MoviesHttpClient {
 
   late final Dio _dio;
   final AppSettings settings;
+  final bool noProxy;
   final _cookiesByHost = <String, Map<String, Cookie>>{};
 
   Future<String> getText(
@@ -214,12 +215,15 @@ class MoviesHttpClient {
   }
 }
 
-Uri? _proxyFromSettings(AppSettings settings) {
+/// Resolved proxy URI from settings or environment.
+Uri? proxyFromSettings(AppSettings settings) {
   final value = settings.proxy.trim().isNotEmpty
       ? settings.proxy.trim()
       : Platform.environment['MOVIESBOX_PROXY']?.trim() ?? '';
   if (value.isEmpty) return null;
-  final uri = Uri.tryParse(value);
+  // Auto-prefix bare host:port with socks5:// as a sensible default.
+  final normalized = value.contains('://') ? value : 'socks5://$value';
+  final uri = Uri.tryParse(normalized);
   if (uri == null || uri.host.isEmpty) return null;
   if (uri.scheme != 'http' &&
       uri.scheme != 'https' &&
