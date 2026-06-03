@@ -66,10 +66,14 @@ flutter build windows --release
 flutter build apk --release
 ```
 
+执行 `flutter build apk --release` 后会同时生成 ABI 专用包和完整包。
+
 已生成的本地构建产物：
 
 - Windows: `build/windows/x64/runner/Release/ChinoBox.exe`
-- Android: `build/app/outputs/flutter-apk/app-release.apk`
+- Android arm64-v8a: `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`
+- Android x86_64: `build/app/outputs/flutter-apk/app-x86_64-release.apk`
+- Android 完整包: `build/app/outputs/flutter-apk/app-release.apk`
 
 Windows 需要整个 `build/windows/x64/runner/Release` 目录一起分发，不能只复制 exe。
 
