@@ -9,6 +9,7 @@ import 'package:media_kit/media_kit.dart' as media_kit;
 import 'package:media_kit_video/media_kit_video.dart' as media_video;
 import 'package:window_manager/window_manager.dart';
 
+import '../../core/network/movies_http_client.dart';
 import '../../core/network/playback_proxy.dart';
 import '../content/data/content_repository.dart';
 import '../content/domain/content_models.dart';
@@ -84,6 +85,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   var _position = Duration.zero;
   var _duration = Duration.zero;
   var _rate = 1.0;
+  var _savedRate = 1.0;
+  var _isLongPressSpeed = false;
   var _isPlaying = false;
   var _isBuffering = false;
   var _isLoading = true;
@@ -96,7 +99,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   var _disposed = false;
   var _fitMode = _VideoFitMode.contain;
   Timer? _hideControlsTimer;
+  Timer? _saveTimer;
   String? _error;
+  Duration? _pendingSeek;
 
   @override
   void initState() {
@@ -119,14 +124,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
       }
     });
     unawaited(_loadEpisodesIfNeeded());
-    unawaited(_startFromSettings());
-    unawaited(_saveHistory());
+    unawaited(_restoreAndStart());
+    _saveTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(_saveHistory()),
+    );
   }
 
   @override
   void dispose() {
     _disposed = true;
     _hideControlsTimer?.cancel();
+    _saveTimer?.cancel();
     if (_isDesktopPlatform) {
       windowManager.removeListener(this);
     }
@@ -160,6 +169,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsControllerProvider);
+    PlaybackProxy.instance.updateProxy(proxyFromSettings(settings));
     final source = sourceById(widget.sourceId);
     final title = _titleText;
 
@@ -226,6 +236,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _handleStageTap,
+        onLongPressStart: (_) => _setLongPressSpeed(true),
+        onLongPressEnd: (_) => _setLongPressSpeed(false),
         child: Stack(
           children: [
             Positioned.fill(child: _buildVideoSurface()),
@@ -836,6 +848,26 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     );
   }
 
+  Future<void> _restoreAndStart() async {
+    if (widget.detailUrl.isNotEmpty) {
+      try {
+        final entries = await ref.read(contentRepositoryProvider).history();
+        final saved = entries.where(
+          (e) => e.sourceId == widget.sourceId && e.detailUrl == widget.detailUrl,
+        );
+        if (saved.isNotEmpty) {
+          final entry = saved.first;
+          if (entry.position > 0 &&
+              entry.duration > 0 &&
+              entry.position < entry.duration - 3000) {
+            _pendingSeek = Duration(milliseconds: entry.position);
+          }
+        }
+      } catch (_) {}
+    }
+    await _startFromSettings();
+  }
+
   Future<void> _startFromSettings() async {
     final settings = ref.read(settingsControllerProvider);
     if (settings.playerLaunchMode == PlayerLaunchMode.external) {
@@ -942,6 +974,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
       play: true,
     );
     await player.setRate(_rate);
+
+    // Restore saved playback position
+    final seekTo = _pendingSeek;
+    _pendingSeek = null;
+    if (seekTo != null && seekTo > Duration.zero) {
+      // Wait a moment for the stream to buffer before seeking
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (!_disposed && _mediaKitPlayer != null) {
+        await player.seek(seekTo);
+      }
+    }
   }
 
   Future<void> _togglePlay() async {
@@ -967,6 +1010,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
       _showControls();
     } catch (error) {
       _showMessage(error.toString());
+    }
+  }
+
+  Future<void> _setLongPressSpeed(bool active) async {
+    if (active) {
+      _savedRate = _rate;
+      _isLongPressSpeed = true;
+      if (mounted) setState(() => _rate = 2.0);
+      try {
+        await _mediaKitPlayer?.setRate(2.0);
+      } catch (_) {}
+    } else {
+      _isLongPressSpeed = false;
+      if (mounted) setState(() => _rate = _savedRate);
+      try {
+        await _mediaKitPlayer?.setRate(_savedRate);
+      } catch (_) {}
     }
   }
 
@@ -1139,7 +1199,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     }
 
     try {
-      await _saveHistory();
       final items = await ref
           .read(contentRepositoryProvider)
           .playItems(widget.sourceId, next.url);
@@ -1422,8 +1481,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   }
 
   Future<void> _saveHistory() async {
-    if (_currentEpisodeUrl.isEmpty) return;
-    final id = '${widget.sourceId}:$_currentEpisodeUrl';
+    if (widget.detailUrl.isEmpty) return;
+    final id = '${widget.sourceId}:${widget.detailUrl}';
     await ref.read(contentRepositoryProvider).saveHistory(
           HistoryEntry(
             id: id,
