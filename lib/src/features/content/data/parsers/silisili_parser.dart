@@ -180,7 +180,7 @@ class SilisiliParser extends SiteParser {
         if (currentLabel.isEmpty && currentTags.isEmpty) return;
         if (currentLabel.contains('更新') && currentTags.isEmpty) {
           updateText = cleanText(pData.text);
-        } else {
+        } else if (currentTags.isNotEmpty) {
           tagGroups.add(TagGroup(label: currentLabel, tags: List.of(currentTags)));
         }
         currentTags.clear();
@@ -194,7 +194,7 @@ class SilisiliParser extends SiteParser {
           currentLabel = cleanText(child.text);
         } else if (child.localName == 'a') {
           final title = cleanText(child.text);
-          if (title.isNotEmpty) {
+          if (title.isNotEmpty && !title.contains('未知')) {
             currentTags.add(
                 DetailTag(title, absolutize(child.attributes['href'] ?? '', base)));
           }
