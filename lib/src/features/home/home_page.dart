@@ -159,33 +159,48 @@ class _CategoryStrip extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final parser = ref.read(contentRepositoryProvider).parserFor(sourceId);
-    final options =
-        parser.categories.expand((group) => group.options).take(12).toList();
-    if (options.isEmpty) return const SizedBox.shrink();
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: options.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final option = options[index];
-          return ActionChip(
-            avatar: const Icon(Icons.grid_view_rounded, size: 18),
-            label: Text(option.title),
-            onPressed: () => context.push(
-              Uri(
-                path: '/browse',
-                queryParameters: {
-                  'source': sourceId,
-                  'title': option.title,
-                  'path': option.path,
-                },
-              ).toString(),
+    final groups = parser.categories;
+    if (groups.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final group in groups) ...[
+          Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 4),
+            child: Text(
+              group.title,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
-          );
-        },
-      ),
+          ),
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: group.options.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final option = group.options[index];
+                return ActionChip(
+                  label: Text(option.title),
+                  onPressed: () => context.push(
+                    Uri(
+                      path: '/browse',
+                      queryParameters: {
+                        'source': sourceId,
+                        'title': option.title,
+                        'path': option.path,
+                      },
+                    ).toString(),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

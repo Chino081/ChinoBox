@@ -213,15 +213,66 @@ class _InfoBlock extends ConsumerWidget {
               ?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            if (detail.score.isNotEmpty)
-              Chip(label: Text('评分 ${detail.score}')),
-            for (final meta in detail.metadata.take(6)) Chip(label: Text(meta)),
-          ],
-        ),
+        if (detail.score.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [Chip(label: Text('评分 ${detail.score}'))],
+          ),
+        if (detail.tagGroups.isNotEmpty) ...[
+          for (final group in detail.tagGroups)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (group.label.isNotEmpty)
+                    Text(
+                      group.label,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                    ),
+                  if (group.tags.isEmpty && group.label.isNotEmpty)
+                    Chip(label: Text(group.label)),
+                  for (final tag in group.tags)
+                    ActionChip(
+                      label: Text(tag.title),
+                      onPressed: () => context.push(
+                        Uri(
+                          path: '/browse',
+                          queryParameters: {
+                            'source': sourceId,
+                            'title': tag.title,
+                            'path': tag.url,
+                          },
+                        ).toString(),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ] else if (detail.metadata.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final meta in detail.metadata.take(6))
+                Chip(label: Text(meta)),
+            ],
+          ),
+        if (detail.updateText.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              detail.updateText,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+            ),
+          ),
         if (detail.summary.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(detail.summary),

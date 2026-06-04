@@ -171,14 +171,37 @@ class SilisiliParser extends SiteParser {
         .where((item) => item.title.isNotEmpty && item.url.isNotEmpty)
         .toList();
 
-    final tags = root
-        .querySelectorAll('p.data a')
-        .map((a) {
-          return DetailTag(
-              cleanText(a.text), absolutize(a.attributes['href'] ?? '', base));
-        })
-        .where((tag) => tag.title.isNotEmpty)
-        .toList();
+    final tagGroups = <TagGroup>[];
+    var updateText = '';
+    for (final pData in root.querySelectorAll('p.data')) {
+      String currentLabel = '';
+      final currentTags = <DetailTag>[];
+      void saveGroup() {
+        if (currentLabel.isEmpty && currentTags.isEmpty) return;
+        if (currentLabel.contains('更新') && currentTags.isEmpty) {
+          updateText = cleanText(pData.text);
+        } else {
+          tagGroups.add(TagGroup(label: currentLabel, tags: List.of(currentTags)));
+        }
+        currentTags.clear();
+      }
+
+      for (final child in pData.nodes) {
+        if (child is! Element) continue;
+        if (child.localName == 'span' &&
+            child.classes.contains('text-muted')) {
+          saveGroup();
+          currentLabel = cleanText(child.text);
+        } else if (child.localName == 'a') {
+          final title = cleanText(child.text);
+          if (title.isNotEmpty) {
+            currentTags.add(
+                DetailTag(title, absolutize(child.attributes['href'] ?? '', base)));
+          }
+        }
+      }
+      saveGroup();
+    }
 
     return MediaDetail(
       title: title.isEmpty ? '未知标题' : title,
@@ -186,12 +209,9 @@ class SilisiliParser extends SiteParser {
       poster: absolutize(attrOf(root, 'div.v_sd_l img', 'src'), base),
       summary: textOf(root, 'div.v_cont'),
       score: textOf(root, 'span.data-favs-num'),
-      metadata: root
-          .querySelectorAll('p.data span.text-muted')
-          .map((e) => cleanText(e.text))
-          .where((e) => e.isNotEmpty)
-          .toList(),
-      tags: tags,
+      updateText: updateText,
+      tagGroups: tagGroups,
+      tags: tagGroups.expand((g) => g.tags).toList(),
       groups: groups,
       recommendations: recommendations,
     );

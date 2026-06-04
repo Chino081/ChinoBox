@@ -81,6 +81,13 @@ class DetailTag {
   final String url;
 }
 
+class TagGroup {
+  const TagGroup({required this.label, required this.tags});
+
+  final String label;
+  final List<DetailTag> tags;
+}
+
 class Episode {
   const Episode({
     required this.title,
@@ -111,6 +118,7 @@ class MediaDetail {
     this.updateText = '',
     this.metadata = const [],
     this.tags = const [],
+    this.tagGroups = const [],
     this.groups = const [],
     this.recommendations = const [],
   });
@@ -123,6 +131,7 @@ class MediaDetail {
   final String updateText;
   final List<String> metadata;
   final List<DetailTag> tags;
+  final List<TagGroup> tagGroups;
   final List<EpisodeGroup> groups;
   final List<MediaItem> recommendations;
 }
