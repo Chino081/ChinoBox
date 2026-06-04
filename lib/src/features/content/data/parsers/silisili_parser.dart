@@ -40,10 +40,11 @@ class SilisiliParser extends SiteParser {
         CategoryGroup(
           title: '频道',
           options: [
-            CategoryOption(title: '全部', path: '/vodshow/2--------1---/'),
-            CategoryOption(title: 'TV动画', path: '/vodshow/2---TV-----1---/'),
-            CategoryOption(title: '剧场版', path: '/vodshow/2---剧场版-----1---/'),
-            CategoryOption(title: 'OVA', path: '/vodshow/2---OVA-----1---/'),
+            CategoryOption(title: '新番日漫', path: '/vodshow/id/xinfanriman/'),
+            CategoryOption(title: '新番国漫', path: '/vodshow/id/xinfanguoman/'),
+            CategoryOption(title: '动漫番剧', path: '/vodshow/id/dongmanfanju/'),
+            CategoryOption(title: '剧场动漫', path: '/vodshow/id/juchang/'),
+            CategoryOption(title: '4K专区', path: '/vodshow/id/4Kzhuanqu/'),
           ],
         ),
       ];
@@ -55,7 +56,14 @@ class SilisiliParser extends SiteParser {
 
   @override
   String categoryUrl(AppSettings settings, String path, int page) {
-    final replaced = path.replaceFirst(RegExp(r'page/\d+|1---'), 'page/$page');
+    // New format: /vodshow/id/xxx/ → /vodshow/id/xxx/page/N
+    // Old format: /vodshow/2--------1---/ → /vodshow/2--------N---/
+    final replaced = path.replaceFirst(RegExp(r'page/\d+'), 'page/$page');
+    if (replaced == path && page > 1) {
+      // New URL format: append page segment
+      final normalized = path.endsWith('/') ? path : '$path/';
+      return absolutize('${normalized}page/$page', domain(settings));
+    }
     return absolutize(replaced, domain(settings));
   }
 
@@ -66,9 +74,11 @@ class SilisiliParser extends SiteParser {
     final bannerItems = document
         .querySelectorAll('div.focus div.swiper-slide')
         .map((e) {
+          final votitle = e.querySelector('div.swiper-slide-votitle');
+          votitle?.querySelectorAll('span.badge').forEach((s) => s.remove());
           return MediaItem(
             title: firstNonEmpty([
-              textOf(e, 'div.swiper-slide-votitle'),
+              cleanText(votitle?.text ?? ''),
               attrOf(e, 'a', 'title'),
             ]),
             url: absolutize(attrOf(e, 'a', 'href'), base),
@@ -87,6 +97,7 @@ class SilisiliParser extends SiteParser {
         .querySelectorAll('article.article')
         .map((e) {
           final titleNode = e.querySelector('h2.entry-title');
+          titleNode?.querySelectorAll('span.badge').forEach((s) => s.remove());
           return MediaItem(
             title: cleanText(titleNode?.text ?? ''),
             url: absolutize(
@@ -253,13 +264,15 @@ class SilisiliParser extends SiteParser {
     return roots
         .map((e) {
           final link = e.localName == 'a' ? e : e.querySelector('a');
+          // Remove badge spans (new/推荐/热门) before extracting title text
+          final titleNode = e.querySelector('h2.entry-title');
+          titleNode?.querySelectorAll('span.badge').forEach((s) => s.remove());
           return MediaItem(
             title: firstNonEmpty([
               link?.attributes['title'] ?? '',
-              textOf(e, 'h2.entry-title'),
+              cleanText(titleNode?.text ?? ''),
               textOf(e, 'div.list-body'),
               textOf(e, 'span.tit'),
-              cleanText(e.text),
             ]),
             url: absolutize(link?.attributes['href'] ?? '', base),
             poster: firstNonEmpty([
