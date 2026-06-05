@@ -37,7 +37,13 @@ class FullscreenController with WindowListener {
     if (isDesktopPlatform) {
       final current = await windowManager.isFullScreen();
       if (current != value) {
-        await windowManager.setFullScreen(value);
+        if (value) {
+          await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+          await windowManager.setFullScreen(true);
+        } else {
+          await windowManager.setFullScreen(false);
+          await windowManager.setTitleBarStyle(TitleBarStyle.normal);
+        }
       }
       if (!_mounted) return;
       state.update(
@@ -72,6 +78,7 @@ class FullscreenController with WindowListener {
     if (isDesktopPlatform) {
       if (await windowManager.isFullScreen()) {
         await windowManager.setFullScreen(false);
+        await windowManager.setTitleBarStyle(TitleBarStyle.normal);
       }
       return;
     }

@@ -16,10 +16,13 @@ class DomainResolver {
 
   final _client = MoviesHttpClient(AppSettings.defaults(), noProxy: true);
 
-  static const _ignoredDomains = {
+  static const _ignoredSuffixes = [
     'google.com',
     'googleapis.com',
     'gstatic.com',
+    'googlesyndication.com',
+    'googletagmanager.com',
+    'google-analytics.com',
     'github.com',
     'githubusercontent.com',
     'youtube.com',
@@ -27,21 +30,21 @@ class DomainResolver {
     'twitter.com',
     'x.com',
     'facebook.com',
+    'fbcdn.net',
     'instagram.com',
     'cloudflare.com',
+    'cdnjs.cloudflare.com',
     'jquery.com',
     'bootstrapcdn.com',
-    'cdnjs.cloudflare.com',
-    'cdn.',
-    'fonts.googleapis.com',
-    'fonts.gstatic.com',
     't.me',
     'telegram.org',
     'apple.com',
     'microsoft.com',
     'bing.com',
     'baidu.com',
+    'bdstatic.com',
     'qq.com',
+    'qpic.cn',
     'weibo.com',
     'zhihu.com',
     'douyin.com',
@@ -50,13 +53,28 @@ class DomainResolver {
     'youku.com',
     'sohu.com',
     'sina.com',
+    'weibo.cn',
     '163.com',
+    '126.net',
     'taobao.com',
     'tmall.com',
     'jd.com',
     'alipay.com',
-    'weixin.qq.com',
-  };
+    'alicdn.com',
+    'amazon.com',
+    'amazonaws.com',
+    'azure.com',
+    'wordpress.com',
+    'wix.com',
+    'godaddy.com',
+    'vercel.app',
+    'netlify.app',
+    'pages.dev',
+    'recaptcha.net',
+    'gstatic.com',
+    'doubleclick.net',
+    'adsense.google.com',
+  ];
 
   Future<void> checkAll(
     List<MediaSource> sources,
@@ -106,37 +124,53 @@ class DomainResolver {
     final releaseHost = Uri.tryParse(source.releasePage)?.host ?? '';
     final defaultHost = Uri.tryParse(source.defaultDomain)?.host ?? '';
 
-    final urlPattern = RegExp(r'https?://([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})');
+    // Only extract URLs from <a href="..."> tags, not from the entire HTML
+    final hrefPattern = RegExp(r"""<a\s[^>]*href=["']([^"']+)["']""", caseSensitive: false);
     final seen = <String>{};
 
-    for (final match in urlPattern.allMatches(html)) {
-      final url = match.group(0)!;
-      final host = match.group(1)!.toLowerCase();
+    for (final match in hrefPattern.allMatches(html)) {
+      final href = match.group(1)!;
+      if (!href.startsWith('http')) continue;
+
+      final uri = Uri.tryParse(href);
+      if (uri == null || uri.host.isEmpty) continue;
+
+      final host = uri.host.toLowerCase();
 
       if (seen.contains(host)) continue;
       seen.add(host);
 
+      // Skip the release page itself and the current default domain
       if (host == releaseHost || host == defaultHost) continue;
       if (_isIgnoredDomain(host)) continue;
 
-      // Must look like a real site domain (has at least one subdomain or is short)
-      final parts = host.split('.');
-      if (parts.length < 2) continue;
+      // Skip if it looks like a CDN or resource host
+      if (_looksLikeCdn(host)) continue;
 
-      return url;
+      // Return the scheme + host as the new domain
+      return '${uri.scheme}://$host';
     }
+
     return null;
   }
 
   bool _isIgnoredDomain(String host) {
-    for (final ignored in _ignoredDomains) {
-      if (ignored.endsWith('.')) {
-        if (host.startsWith(ignored) || host == ignored.substring(0, ignored.length - 1)) {
-          return true;
-        }
-      } else if (host == ignored || host.endsWith('.$ignored')) {
+    for (final suffix in _ignoredSuffixes) {
+      if (host == suffix || host.endsWith('.$suffix')) {
         return true;
       }
+    }
+    return false;
+  }
+
+  bool _looksLikeCdn(String host) {
+    // Skip hosts that look like CDNs or static resource servers
+    final h = host.toLowerCase();
+    if (h.startsWith('cdn.') || h.startsWith('static.') || h.startsWith('img.')) {
+      return true;
+    }
+    if (h.contains('cdn') || h.contains('static') || h.contains('assets')) {
+      return true;
     }
     return false;
   }

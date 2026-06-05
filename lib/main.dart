@@ -12,6 +12,15 @@ Future<void> main() async {
   MediaKit.ensureInitialized();
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
+    const options = WindowOptions(
+      size: Size(1280, 720),
+      center: true,
+      titleBarStyle: TitleBarStyle.normal,
+    );
+    await windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
   }
   runApp(const ProviderScope(child: ChinoBoxApp()));
 }
