@@ -32,6 +32,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   var _items = <MediaItem>[];
   var _searching = false;
   Future<List<MediaItem>>? _future;
+  late bool _allSourcesMode;
+  late Set<String> _selectedSources;
 
   String get _sourceId {
     return widget.sourceId ?? ref.read(settingsControllerProvider).sourceId;
@@ -43,6 +45,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     _controller = TextEditingController(text: widget.initialQuery);
     _captchaController = TextEditingController();
     _query = widget.initialQuery.trim();
+    _allSourcesMode = widget.sourceId == null;
+    _selectedSources = searchableSources().map((s) => s.id).toSet();
     if (_query.isNotEmpty) _search(reset: true);
   }
 
@@ -77,9 +81,19 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _page = 1;
       _items = [];
     }
-    final data = await ref
-        .read(contentRepositoryProvider)
-        .search(_sourceId, _query, _page, verificationCode: verificationCode);
+    final repo = ref.read(contentRepositoryProvider);
+    List<MediaItem> data;
+    if (_allSourcesMode) {
+      final sourceIds = _selectedSources.toList();
+      data = await repo.searchAll(_query, _page, sourceIds: sourceIds);
+    } else {
+      data = await repo.search(
+        _sourceId,
+        _query,
+        _page,
+        verificationCode: verificationCode,
+      );
+    }
     if (reset) {
       _items = data;
     } else {
@@ -92,7 +106,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   Widget build(BuildContext context) {
     final source = sourceById(_sourceId);
     return Scaffold(
-      appBar: AppBar(title: Text('${source.name} 搜索')),
+      appBar: AppBar(
+        title: Text(_allSourcesMode ? '全站搜索' : '${source.name} 搜索'),
+      ),
       body: Column(
         children: [
           Padding(
@@ -113,6 +129,29 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               onSubmitted: (_) => _search(reset: true),
             ),
           ),
+          _SourceFilter(
+            allSourcesMode: _allSourcesMode,
+            selectedSources: _selectedSources,
+            onModeChanged: (all) {
+              setState(() {
+                _allSourcesMode = all;
+                if (all) {
+                  _selectedSources = searchableSources().map((s) => s.id).toSet();
+                }
+              });
+              if (_query.isNotEmpty) _search(reset: true);
+            },
+            onSourceToggle: (id, selected) {
+              setState(() {
+                if (selected) {
+                  _selectedSources.add(id);
+                } else {
+                  _selectedSources.remove(id);
+                }
+              });
+              if (_query.isNotEmpty) _search(reset: true);
+            },
+          ),
           Expanded(
             child: _future == null
                 ? const EmptyState(
@@ -126,8 +165,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       if (snapshot.hasError) {
                         final error = snapshot.error;
                         if (error is SearchCaptchaRequired) {
+                          final sourceName = error.sourceId.isNotEmpty
+                              ? sourceById(error.sourceId).name
+                              : source.name;
                           return _CaptchaView(
                             challenge: error,
+                            sourceName: sourceName,
                             controller: _captchaController,
                             onSubmit: () {
                               final code = _captchaController.text.trim();
@@ -150,8 +193,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                         return const EmptyState(message: '没有找到相关内容');
                       }
                       return _ResultList(
-                        sourceId: _sourceId,
                         items: data,
+                        showSourceBadge: _allSourcesMode,
                         onLoadMore: () {
                           setState(() => _page += 1);
                           _search(reset: false);
@@ -166,15 +209,82 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   }
 }
 
+class _SourceFilter extends StatelessWidget {
+  const _SourceFilter({
+    required this.allSourcesMode,
+    required this.selectedSources,
+    required this.onModeChanged,
+    required this.onSourceToggle,
+  });
+
+  final bool allSourcesMode;
+  final Set<String> selectedSources;
+  final ValueChanged<bool> onModeChanged;
+  final void Function(String id, bool selected) onSourceToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final sources = searchableSources();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              FilterChip(
+                label: const Text('全部'),
+                selected: allSourcesMode,
+                onSelected: onModeChanged,
+              ),
+              if (!allSourcesMode) ...[
+                const SizedBox(width: 8),
+                FilterChip(
+                  label: Text(sourceById(sources.isNotEmpty
+                          ? sources.first.id
+                          : 'libvio')
+                      .name),
+                  selected: !allSourcesMode,
+                  onSelected: (_) => onModeChanged(true),
+                ),
+              ],
+            ],
+          ),
+          if (allSourcesMode) ...[
+            const SizedBox(height: 4),
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: sources.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (context, index) {
+                  final s = sources[index];
+                  final selected = selectedSources.contains(s.id);
+                  return FilterChip(
+                    label: Text(s.name),
+                    selected: selected,
+                    onSelected: (v) => onSourceToggle(s.id, v),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _ResultList extends StatelessWidget {
   const _ResultList({
-    required this.sourceId,
     required this.items,
+    required this.showSourceBadge,
     required this.onLoadMore,
   });
 
-  final String sourceId;
   final List<MediaItem> items;
+  final bool showSourceBadge;
   final VoidCallback onLoadMore;
 
   @override
@@ -195,7 +305,8 @@ class _ResultList extends StatelessWidget {
               ),
             );
           }
-          return WideMediaTile(item: items[index], sourceId: sourceId);
+          final item = items[index];
+          return WideMediaTile(item: item, sourceId: item.sourceId);
         },
       );
     }
@@ -208,8 +319,10 @@ class _ResultList extends StatelessWidget {
         crossAxisSpacing: 16,
       ),
       itemCount: items.length,
-      itemBuilder: (context, index) =>
-          PosterCard(item: items[index], sourceId: sourceId),
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return PosterCard(item: item, sourceId: item.sourceId);
+      },
     );
   }
 }
@@ -217,12 +330,14 @@ class _ResultList extends StatelessWidget {
 class _CaptchaView extends StatelessWidget {
   const _CaptchaView({
     required this.challenge,
+    required this.sourceName,
     required this.controller,
     required this.onSubmit,
     required this.onRefresh,
   });
 
   final SearchCaptchaRequired challenge;
+  final String sourceName;
   final TextEditingController controller;
   final VoidCallback onSubmit;
   final VoidCallback onRefresh;
@@ -241,7 +356,7 @@ class _CaptchaView extends StatelessWidget {
               const Icon(Icons.verified_user_outlined, size: 36),
               const SizedBox(height: 12),
               Text(
-                challenge.message,
+                '$sourceName：${challenge.message}',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium,
               ),

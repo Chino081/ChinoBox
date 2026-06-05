@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -113,11 +114,11 @@ class _PosterImage extends StatelessWidget {
         ),
       );
     }
-    return Image.network(
-      url,
+    return CachedNetworkImage(
+      imageUrl: url,
       fit: BoxFit.cover,
-      cacheWidth: 284,
-      errorBuilder: (context, error, stackTrace) => ColoredBox(
+      memCacheWidth: 284,
+      errorWidget: (context, url, error) => ColoredBox(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Icon(
           Icons.broken_image_outlined,

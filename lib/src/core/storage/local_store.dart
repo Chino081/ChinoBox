@@ -60,6 +60,12 @@ class LocalStore {
     return writeList(_historyKey, data);
   }
 
+  Future<void> removeFavorite(String id) async {
+    final list = await readFavorites();
+    list.removeWhere((item) => item['id'] == id);
+    await writeFavorites(list);
+  }
+
   Future<void> removeHistory(String id) async {
     final list = await readHistory();
     list.removeWhere((item) => item['id'] == id);

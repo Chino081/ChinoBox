@@ -90,7 +90,7 @@ class SilisiliParser extends SiteParser {
         .where((item) => item.title.isNotEmpty && item.url.isNotEmpty)
         .toList();
     if (bannerItems.isNotEmpty) {
-      sections.add(HomeSection(title: '推荐', items: bannerItems));
+      sections.add(HomeSection(title: '推荐', items: bannerItems, isBanner: true));
     }
 
     final updateItems = document

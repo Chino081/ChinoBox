@@ -41,10 +41,15 @@ class HomePayload {
     required this.sections,
     required this.categories,
     this.notice = '',
+    this.rssItems = const [],
   });
 
   final String sourceId;
   final List<HomeSection> sections;
   final List<CategoryGroup> categories;
   final String notice;
+  final List<RssItem> rssItems;
+
+  List<MediaItem> get banners =>
+      sections.where((s) => s.isBanner).expand((s) => s.items).toList();
 }

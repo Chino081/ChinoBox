@@ -56,6 +56,12 @@ class GenericMaccmsParser extends SiteParser {
   List<HomeSection> parseHome(Document document, AppSettings settings) {
     final base = domain(settings);
     final sections = <HomeSection>[];
+
+    final banners = _parseBanners(document, base);
+    if (banners.isNotEmpty) {
+      sections.add(HomeSection(title: '推荐', items: banners, isBanner: true));
+    }
+
     final panels =
         document.querySelectorAll('.stui-pannel, .module, .box, section');
     for (final panel in panels) {
@@ -76,6 +82,48 @@ class GenericMaccmsParser extends SiteParser {
     final items = _parseItems(rootElement(document), base);
     if (items.isEmpty) return const [];
     return [HomeSection(title: '推荐', items: items.take(36).toList())];
+  }
+
+  List<MediaItem> _parseBanners(Document document, String base) {
+    const selectors = [
+      '.carousel-wrapper .swiper-slide a',
+      'div.swiper-wrapper .swiper-slide a',
+      '.stui-banner .swiper-slide a',
+      '.module-banner .swiper-slide a',
+      'div.focus .swiper-slide a',
+      '.swiper-slide a[href*="/detail/"]',
+    ];
+    for (final selector in selectors) {
+      final anchors = document.querySelectorAll(selector);
+      if (anchors.isEmpty) continue;
+      final items = <MediaItem>[];
+      for (final a in anchors) {
+        final url = absolutize(a.attributes['href'] ?? '', base);
+        if (url.isEmpty) continue;
+        final img = a.querySelector('img');
+        final poster = absolutize(
+          img?.attributes['data-original'] ??
+              img?.attributes['data-src'] ??
+              img?.attributes['src'] ??
+              '',
+          base,
+        );
+        final title = firstNonEmpty([
+          a.attributes['title'] ?? '',
+          img?.attributes['alt'] ?? '',
+          cleanText(a.text),
+        ]);
+        if (title.isEmpty) continue;
+        items.add(MediaItem(
+          title: title,
+          url: url,
+          poster: poster,
+          sourceId: source.id,
+        ));
+      }
+      if (items.length >= 2) return items.take(12).toList();
+    }
+    return const [];
   }
 
   @override

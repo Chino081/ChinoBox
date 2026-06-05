@@ -21,7 +21,6 @@ const sourceCatalog = <MediaSource>[
     info: '原项目依赖站点 Cookie 才能进入内容页',
     health: SourceHealth.abnormal,
     canSearch: true,
-    rssPath: '/rss.xml',
     message: '按原 Java 版行为默认附带站点访问 Cookie；设置页可本地覆盖。',
   ),
   MediaSource(
@@ -52,7 +51,7 @@ const sourceCatalog = <MediaSource>[
     index: 4,
     name: 'LIBVIO',
     kind: SourceKind.movies,
-    defaultDomain: 'https://www.libvio.run',
+    defaultDomain: 'https://www.libvios.com',
     releasePage: 'https://ifabu.vip',
     info: '质量高，但可能存在域名变更或安全检测。',
     health: SourceHealth.normal,
@@ -130,6 +129,10 @@ final Map<String, MediaSource> _sourceByIdMap = {
 
 List<MediaSource> visibleSourceCatalog() {
   return sourceCatalog.where((source) => source.visible).toList();
+}
+
+List<MediaSource> searchableSources() {
+  return visibleSourceCatalog().where((s) => s.canSearch).toList();
 }
 
 MediaSource sourceById(String id) {

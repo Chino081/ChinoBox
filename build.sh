@@ -6,7 +6,7 @@ FLUTTER="$SCRIPT_DIR/../flutter/bin/flutter"
 DIST="$SCRIPT_DIR/dist"
 WIN_RELEASE="$SCRIPT_DIR/build/windows/x64/runner/Release"
 
-# Proxy (set MOVIESBOX_BUILD_PROXY to override, e.g. http://user:pass@host:port)
+# Proxy (set MOVIESBOX_BUILD_PROXY to enable, e.g. http://user:pass@host:port)
 PROXY="${MOVIESBOX_BUILD_PROXY:-}"
 
 # Parse args

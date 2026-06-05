@@ -21,7 +21,7 @@ class TbysParser extends GenericMaccmsParser {
 
     final banners = _parseBannerItems(document, base);
     if (banners.isNotEmpty) {
-      sections.add(HomeSection(title: '影视推荐', items: banners));
+      sections.add(HomeSection(title: '影视推荐', items: banners, isBanner: true));
     }
 
     final defaultTitles = ['热门电影', '电影', '连续剧', '综艺', '动画'];

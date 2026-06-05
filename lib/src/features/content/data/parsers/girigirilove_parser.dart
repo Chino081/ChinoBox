@@ -84,7 +84,7 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
 
     final banners = _parseBannerItems(document, base);
     if (banners.isNotEmpty) {
-      sections.add(HomeSection(title: '动漫推荐', items: banners));
+      sections.add(HomeSection(title: '动漫推荐', items: banners, isBanner: true));
     }
 
     for (final box in document.querySelectorAll('.box-width.wow.fadeInUp')) {

@@ -1,6 +1,11 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/router.dart';
 import '../../shared/widgets/async_state_view.dart';
@@ -8,18 +13,42 @@ import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../../shared/widgets/source_badge.dart';
 import '../content/data/content_repository.dart';
+import '../content/data/parser_registry.dart';
+import '../content/domain/content_models.dart';
 import '../settings/settings_controller.dart';
+import '../source/data/domain_resolver.dart';
 import '../source/domain/source_catalog.dart';
 import 'source_switch_sheet.dart';
 
-class HomePage extends ConsumerWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends ConsumerState<HomePage> {
+  bool _domainChecked = false;
+
+  @override
+  Widget build(BuildContext context) {
     final settings = ref.watch(settingsControllerProvider);
     final source = sourceById(settings.sourceId);
     final home = ref.watch(homeProvider);
+
+    if (!_domainChecked) {
+      _domainChecked = true;
+      ref.listen<AsyncValue<HomePayload>>(homeProvider, (prev, next) {
+        if (next.hasValue && !next.isLoading) {
+          final sources = visibleSourceCatalog()
+              .where((s) => s.hasReleasePage)
+              .toList();
+          if (sources.isNotEmpty) {
+            unawaited(DomainResolver.instance.checkAll(sources, settings));
+          }
+        }
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -78,27 +107,33 @@ class HomePage extends ConsumerWidget {
               children: [
                 _SourceHeader(sourceId: source.id, notice: data.notice),
                 _CategoryStrip(sourceId: source.id),
-                for (final section in data.sections) ...[
-                  _SectionHeader(
-                      title: section.title,
-                      sourceId: source.id,
-                      moreUrl: section.moreUrl),
-                  SizedBox(
-                    height: 242,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: section.items.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        return PosterCard(
-                          item: section.items[index],
-                          sourceId: source.id,
-                          compact: true,
-                        );
-                      },
+                if (data.banners.isNotEmpty &&
+                    (Platform.isAndroid || Platform.isIOS))
+                  _BannerCarousel(banners: data.banners, sourceId: source.id),
+                if (data.rssItems.isNotEmpty)
+                  _RssSection(items: data.rssItems),
+                for (final section in data.sections)
+                  if (!section.isBanner) ...[
+                    _SectionHeader(
+                        title: section.title,
+                        sourceId: source.id,
+                        moreUrl: section.moreUrl),
+                    SizedBox(
+                      height: 242,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: section.items.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) {
+                          return PosterCard(
+                            item: section.items[index],
+                            sourceId: source.id,
+                            compact: true,
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ],
+                  ],
               ],
             );
           },
@@ -237,6 +272,192 @@ class _SectionHeader extends StatelessWidget {
               icon: const Icon(Icons.arrow_forward_rounded, size: 18),
               label: const Text('更多'),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RssSection extends StatelessWidget {
+  const _RssSection({required this.items});
+
+  final List<RssItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              '最新更新',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+          ...items.take(8).map((item) => Card(
+                margin: const EdgeInsets.only(bottom: 6),
+                child: ListTile(
+                  dense: true,
+                  title: Text(item.title,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: item.pubDate != null
+                      ? Text(_relativeTime(item.pubDate!))
+                      : null,
+                  trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                  onTap: () => launchUrl(Uri.parse(item.link)),
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+
+  static String _relativeTime(DateTime date) {
+    final diff = DateTime.now().difference(date);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
+    if (diff.inHours < 24) return '${diff.inHours}小时前';
+    if (diff.inDays < 30) return '${diff.inDays}天前';
+    return '${date.month}/${date.day}';
+  }
+}
+
+class _BannerCarousel extends StatefulWidget {
+  const _BannerCarousel({required this.banners, required this.sourceId});
+
+  final List<MediaItem> banners;
+  final String sourceId;
+
+  @override
+  State<_BannerCarousel> createState() => _BannerCarouselState();
+}
+
+class _BannerCarouselState extends State<_BannerCarousel> {
+  late final PageController _controller;
+  Timer? _timer;
+  int _current = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController();
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted || widget.banners.length < 2) return;
+      _current = (_current + 1) % widget.banners.length;
+      _controller.animateToPage(
+        _current,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: widget.banners.length,
+                onPageChanged: (i) => setState(() => _current = i),
+                itemBuilder: (context, index) {
+                  final item = widget.banners[index];
+                  return GestureDetector(
+                    onTap: () => context.push(
+                      detailLocation(
+                        sourceId: widget.sourceId,
+                        url: item.url,
+                      ),
+                    ),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (item.poster.isNotEmpty)
+                          CachedNetworkImage(
+                            imageUrl: item.poster,
+                            fit: BoxFit.cover,
+                            memCacheWidth: 640,
+                            errorWidget: (_, __, ___) => ColoredBox(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                            ),
+                          )
+                        else
+                          ColoredBox(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                          ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(12, 24, 12, 10),
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Colors.transparent, Colors.black54],
+                              ),
+                            ),
+                            child: Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          if (widget.banners.length > 1) ...[
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(widget.banners.length, (i) {
+                return Container(
+                  width: 6,
+                  height: 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: i == _current
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                );
+              }),
+            ),
+          ],
         ],
       ),
     );

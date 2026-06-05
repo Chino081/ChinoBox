@@ -8,8 +8,11 @@ import '../../../core/network/movies_http_client.dart';
 import '../../../core/storage/local_store.dart';
 import '../../settings/app_settings.dart';
 import '../../settings/settings_controller.dart';
+import '../../source/data/domain_resolver.dart';
+import '../../source/domain/source_catalog.dart';
 import '../domain/content_models.dart';
 import 'parser_registry.dart';
+import 'rss_service.dart';
 import 'site_parser.dart';
 
 final contentRepositoryProvider = Provider<ContentRepository>((ref) {
@@ -66,11 +69,26 @@ class ContentRepository {
     final body = await _fetch(parser.homeUrl(_settings), parser);
     final document = html_parser.parse(body);
     final sections = parser.parseHome(document, _settings);
+
+    List<RssItem> rssItems = const [];
+    if (parser.source.hasRss) {
+      try {
+        final rssService = RssService(clientFor(parser));
+        rssItems = await rssService.fetchRss(
+          parser.domain(_settings),
+          parser.source.rssPath,
+        );
+      } catch (_) {
+        // RSS failure should not break the home page
+      }
+    }
+
     return HomePayload(
       sourceId: parser.source.id,
       sections: sections,
       categories: parser.categories,
       notice: parser.source.message,
+      rssItems: rssItems,
     );
   }
 
@@ -122,10 +140,38 @@ class ContentRepository {
       throw SearchCaptchaRequired(
         imageUrl: captchaUrl,
         imageBytes: imageBytes,
+        sourceId: sourceId,
         message: code.isEmpty ? '请输入验证码后继续搜索' : '验证码不正确，请重新输入',
       );
     }
     return parser.parseList(document, _settings);
+  }
+
+  Future<List<MediaItem>> searchAll(
+    String query,
+    int page, {
+    List<String>? sourceIds,
+  }) async {
+    final sources = sourceIds != null
+        ? sourceIds.map(parserFor).toList()
+        : searchableSources().map((s) => parserFor(s.id)).toList();
+    final futures = sources.map((parser) async {
+      try {
+        return await search(parser.source.id, query, page);
+      } on SearchCaptchaRequired {
+        rethrow;
+      } catch (_) {
+        return <MediaItem>[];
+      }
+    });
+    final results = await Future.wait(futures);
+    final merged = <String, MediaItem>{};
+    for (final items in results) {
+      for (final item in items) {
+        merged.putIfAbsent(item.url, () => item);
+      }
+    }
+    return merged.values.toList();
   }
 
   Future<List<MediaItem>> browse(String sourceId, String path, int page) async {
@@ -180,6 +226,8 @@ class ContentRepository {
     return _favoriteIdCache!.contains(id);
   }
 
+  static const _favoritesCap = 500;
+
   Future<void> toggleFavorite(MediaDetail detail, String sourceId) async {
     final id = _entryId(sourceId, detail.url);
     final list = await favorites();
@@ -187,6 +235,9 @@ class ContentRepository {
     if (existing >= 0) {
       list.removeAt(existing);
     } else {
+      if (list.length >= _favoritesCap) {
+        throw AppError('收藏数量已达上限 ($_favoritesCap)');
+      }
       list.add(
         FavoriteEntry(
           id: id,
@@ -199,6 +250,21 @@ class ContentRepository {
         ),
       );
     }
+    await store.writeFavorites(list.map((item) => item.toJson()).toList());
+    _favoriteListCache = null;
+    _favoriteIdCache = null;
+  }
+
+  Future<void> removeFavorite(String id) async {
+    await store.removeFavorite(id);
+    _favoriteListCache = null;
+    _favoriteIdCache = null;
+  }
+
+  Future<void> restoreFavorite(FavoriteEntry entry) async {
+    final list = await favorites();
+    list.removeWhere((item) => item.id == entry.id);
+    list.add(entry);
     await store.writeFavorites(list.map((item) => item.toJson()).toList());
     _favoriteListCache = null;
     _favoriteIdCache = null;
@@ -224,6 +290,11 @@ class ContentRepository {
     _historyCache = null;
   }
 
+  Future<void> removeHistory(String id) async {
+    await store.removeHistory(id);
+    _historyCache = null;
+  }
+
   Future<void> clearCache() => store.clearCache();
 
   Future<String> _fetch(
@@ -238,12 +309,32 @@ class ContentRepository {
       final cached = await store.readCache(key, maxAge);
       if (cached != null) return cached;
     }
-    final body = await clientFor(parser)
-        .getText(url, headers: parser.requestHeaders(_settings));
-    if (useCache && _settings.cacheEnabled && body.isNotEmpty) {
-      await store.writeCache(key, body);
+    try {
+      final body = await clientFor(parser)
+          .getText(url, headers: parser.requestHeaders(_settings));
+      if (useCache && _settings.cacheEnabled && body.isNotEmpty) {
+        await store.writeCache(key, body);
+      }
+      return body;
+    } on AppError catch (_) {
+      if (!parser.source.hasReleasePage) rethrow;
+      final newDomain = await DomainResolver.instance
+          .fetchLatestDomain(parser.source, _settings);
+      if (newDomain == null) rethrow;
+      final oldDomain = parser.domain(_settings);
+      final newUrl = url.replaceFirst(oldDomain, newDomain);
+      if (newUrl == url) rethrow;
+      ref.read(settingsControllerProvider.notifier).setSourceDomain(
+            parser.source.id,
+            newDomain,
+          );
+      final body = await clientFor(parser)
+          .getText(newUrl, headers: parser.requestHeaders(_settings));
+      if (useCache && _settings.cacheEnabled && body.isNotEmpty) {
+        await store.writeCache(key, body);
+      }
+      return body;
     }
-    return body;
   }
 }
 

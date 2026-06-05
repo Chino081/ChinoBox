@@ -1,15 +1,18 @@
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/router.dart';
+import '../../core/app_error.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../../shared/widgets/error_retry_view.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../content/data/content_repository.dart';
 import '../content/domain/content_models.dart';
+import '../download/widgets/download_episode_selector.dart';
 import '../source/domain/source_catalog.dart';
 
 class DetailPage extends ConsumerStatefulWidget {
@@ -36,31 +39,55 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         ref.read(contentRepositoryProvider).detail(widget.sourceId, widget.url);
   }
 
+  Future<void> _refresh() async {
+    setState(() {
+      _future =
+          ref.read(contentRepositoryProvider).detail(widget.sourceId, widget.url);
+    });
+    await _future;
+  }
+
   @override
   Widget build(BuildContext context) {
     final source = sourceById(widget.sourceId);
     return Scaffold(
       appBar: AppBar(title: Text(source.name)),
-      body: FutureBuilder<MediaDetail>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return ErrorRetryView(
-              message: snapshot.error.toString(),
-              onRetry: () => setState(() {
-                _future = ref
-                    .read(contentRepositoryProvider)
-                    .detail(widget.sourceId, widget.url);
-              }),
-            );
-          }
-          final detail = snapshot.data;
-          if (detail == null) return const EmptyState(message: '详情为空');
-          return _DetailBody(sourceId: widget.sourceId, detail: detail);
-        },
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<MediaDetail>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return ListView(
+                children: const [
+                  SizedBox(height: 400, child: Center(child: CircularProgressIndicator())),
+                ],
+              );
+            }
+            if (snapshot.hasError) {
+              return ListView(
+                children: [
+                  SizedBox(
+                    height: 400,
+                    child: ErrorRetryView(
+                      message: snapshot.error.toString(),
+                      onRetry: _refresh,
+                    ),
+                  ),
+                ],
+              );
+            }
+            final detail = snapshot.data;
+            if (detail == null) {
+              return ListView(
+                children: const [
+                  SizedBox(height: 400, child: Center(child: EmptyState(message: '详情为空'))),
+                ],
+              );
+            }
+            return _DetailBody(sourceId: widget.sourceId, detail: detail);
+          },
+        ),
       ),
     );
   }
@@ -108,10 +135,10 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                             .surfaceContainerHighest,
                         child: const Icon(Icons.movie_outlined, size: 48),
                       )
-                    : Image.network(
-                        detail.poster,
+                    : CachedNetworkImage(
+                        imageUrl: detail.poster,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => ColoredBox(
+                        errorWidget: (_, __, ___) => ColoredBox(
                           color: Theme.of(context)
                               .colorScheme
                               .surfaceContainerHighest,
@@ -289,23 +316,47 @@ class _InfoBlock extends ConsumerWidget {
           Text(detail.summary),
         ],
         const SizedBox(height: 12),
-        FutureBuilder<bool>(
-          future: favoriteFuture,
-          builder: (context, snapshot) {
-            final isFavorite = snapshot.data ?? false;
-            return FilledButton.tonalIcon(
-              onPressed: () async {
-                await ref
-                    .read(contentRepositoryProvider)
-                    .toggleFavorite(detail, sourceId);
-                onFavoriteChanged();
+        Row(
+          children: [
+            FutureBuilder<bool>(
+              future: favoriteFuture,
+              builder: (context, snapshot) {
+                final isFavorite = snapshot.data ?? false;
+                return FilledButton.tonalIcon(
+                  onPressed: () async {
+                    try {
+                      await ref
+                          .read(contentRepositoryProvider)
+                          .toggleFavorite(detail, sourceId);
+                      onFavoriteChanged();
+                    } on AppError catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(e.message)),
+                        );
+                      }
+                    }
+                  },
+                  icon: Icon(isFavorite
+                      ? Icons.bookmark_remove_rounded
+                      : Icons.bookmark_add_outlined),
+                  label: Text(isFavorite ? '取消收藏' : '收藏'),
+                );
               },
-              icon: Icon(isFavorite
-                  ? Icons.bookmark_remove_rounded
-                  : Icons.bookmark_add_outlined),
-              label: Text(isFavorite ? '取消收藏' : '收藏'),
-            );
-          },
+            ),
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              onPressed: detail.groups.isEmpty
+                  ? null
+                  : () => DownloadEpisodeSelector.show(
+                        context,
+                        sourceId: sourceId,
+                        detail: detail,
+                      ),
+              icon: const Icon(Icons.download_rounded),
+              label: const Text('下载'),
+            ),
+          ],
         ),
       ],
     );

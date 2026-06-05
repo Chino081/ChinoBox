@@ -47,11 +47,13 @@ class HomeSection {
     required this.title,
     required this.items,
     this.moreUrl = '',
+    this.isBanner = false,
   });
 
   final String title;
   final List<MediaItem> items;
   final String moreUrl;
+  final bool isBanner;
 }
 
 class CategoryOption {
@@ -259,4 +261,20 @@ class HistoryEntry {
       'updatedAt': updatedAt,
     };
   }
+}
+
+class RssItem {
+  const RssItem({
+    required this.title,
+    required this.link,
+    this.description = '',
+    this.pubDate,
+    this.sourceName = '',
+  });
+
+  final String title;
+  final String link;
+  final String description;
+  final DateTime? pubDate;
+  final String sourceName;
 }

@@ -120,7 +120,7 @@ class YjysParser extends SiteParser {
         .toList();
     final cards = parseList(document, settings);
     return [
-      if (banners.isNotEmpty) HomeSection(title: '推荐', items: banners),
+      if (banners.isNotEmpty) HomeSection(title: '推荐', items: banners, isBanner: true),
       if (cards.isNotEmpty)
         HomeSection(title: '影视列表', items: cards.take(36).toList()),
     ];
