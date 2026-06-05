@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/network/movies_http_client.dart';
@@ -192,7 +193,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               unawaited(_fullscreen.setFullscreen(false));
             }
           },
-          child: Scaffold(
+          child: Focus(
+            autofocus: true,
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent &&
+                  event.logicalKey == LogicalKeyboardKey.escape &&
+                  _state.isFullscreen) {
+                unawaited(_fullscreen.setFullscreen(false));
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: Scaffold(
             backgroundColor: Colors.black,
             appBar: _state.isFullscreen
                 ? null
@@ -237,6 +249,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
                     ]),
             ),
           ),
+        ),
         );
       },
     );
