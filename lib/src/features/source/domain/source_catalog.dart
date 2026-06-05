@@ -52,7 +52,6 @@ const sourceCatalog = <MediaSource>[
     name: 'LIBVIO',
     kind: SourceKind.movies,
     defaultDomain: 'https://www.libvios.com',
-    releasePage: 'https://ifabu.vip',
     info: '质量高，但可能存在域名变更或安全检测。',
     health: SourceHealth.normal,
   ),

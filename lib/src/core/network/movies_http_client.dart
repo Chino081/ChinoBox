@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
@@ -37,12 +39,16 @@ class MoviesHttpClient {
       InterceptorsWrapper(
         onRequest: (options, handler) {
           final cookie = _cookieHeader(options.uri);
-          if (cookie.isNotEmpty) {
+          final parts = <String>[
+            if (cookie.isNotEmpty) cookie,
+            if (_funCdnToken.isNotEmpty) '_funcdn_token=$_funCdnToken',
+          ];
+          if (parts.isNotEmpty) {
             final existing =
                 options.headers[HttpHeaders.cookieHeader]?.toString() ?? '';
             options.headers[HttpHeaders.cookieHeader] = [
               if (existing.isNotEmpty) existing,
-              cookie,
+              ...parts,
             ].join('; ');
           }
           handler.next(options);
@@ -144,7 +150,84 @@ class MoviesHttpClient {
 
   Future<String> _requestText(Future<Response<String>> Function() run) async {
     final response = await _retryRequest(run);
-    return response.data ?? '';
+    final body = response.data ?? '';
+    if (_isFunCdnChallenge(body)) {
+      final solved = await _solveFunCdnChallenge(body);
+      if (solved) {
+        final retryResponse = await _retryRequest(run);
+        return retryResponse.data ?? '';
+      }
+    }
+    return body;
+  }
+
+  bool _isFunCdnChallenge(String body) {
+    return body.contains('jsCaptchaVerify') && body.contains('_funcdn_token');
+  }
+
+  Future<bool> _solveFunCdnChallenge(String body) async {
+    final challenge = _extractCdnField(body, 'challenge');
+    final answer = _extractCdnField(body, 'answer');
+    final userinfo = _extractCdnField(body, 'userinfo');
+    final hostinfo = _extractCdnField(body, 'hostinfo');
+    if (challenge.isEmpty || answer.isEmpty) return false;
+
+    // Brute-force 6-digit code: md5(challenge + code) == answer
+    String? code;
+    for (var i = 100000; i <= 999999; i++) {
+      final hash = md5.convert(utf8.encode('$challenge$i')).toString();
+      if (hash == answer) {
+        code = i.toString();
+        break;
+      }
+    }
+    if (code == null) {
+      AppLogger.warn('FunCDN challenge solve failed: no matching code');
+      return false;
+    }
+
+    try {
+      final verifyDio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 10),
+          headers: const {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                    '(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+          },
+        ),
+      );
+      final verifyResponse = await verifyDio.post<Map<String, dynamic>>(
+        'https://fn-captcha.tacool.com/jsCaptchaVerify',
+        data: {
+          'userinfo': userinfo,
+          'hostinfo': hostinfo,
+          'challenge': challenge,
+          'answer': answer,
+          'code': code,
+        },
+      );
+      final token = verifyResponse.data?['fc_token']?.toString();
+      if (token == null || token.isEmpty) {
+        AppLogger.warn('FunCDN verify returned no token');
+        return false;
+      }
+
+      _funCdnToken = token;
+      AppLogger.info('FunCDN challenge solved');
+      return true;
+    } catch (e) {
+      AppLogger.warn('FunCDN verify request failed: $e');
+      return false;
+    }
+  }
+
+  String _funCdnToken = '';
+
+  String _extractCdnField(String body, String field) {
+    final match = RegExp("$field\\s*:\\s*['\"]([^'\"]+)['\"]").firstMatch(body);
+    return match?.group(1) ?? '';
   }
 
   HttpClient _createClient(Uri? proxy) {
