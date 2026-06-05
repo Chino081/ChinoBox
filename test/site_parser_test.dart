@@ -1,4 +1,5 @@
 import 'package:chinobox/src/core/network/movies_http_client.dart';
+import 'package:dio/dio.dart';
 import 'package:chinobox/src/features/content/data/parsers/girigirilove_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/iyinghua_parser.dart';
 import 'package:chinobox/src/features/content/data/parsers/libvio_parser.dart';
@@ -505,6 +506,7 @@ class _FakeMoviesHttpClient extends MoviesHttpClient {
   Future<String> getText(
     String url, {
     Map<String, String> headers = const {},
+    CancelToken? cancelToken,
   }) async {
     requests.add(_FakeRequest(url, headers));
     final body = responses[url];

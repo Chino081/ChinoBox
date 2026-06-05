@@ -151,13 +151,7 @@ List<PlayItem> extractDirectPlayItems(
   }
 
   return urls.map((url) {
-    final lower = url.toLowerCase();
-    final type = lower.contains('.m3u8')
-        ? PlayType.m3u8
-        : lower.contains('.mp4')
-            ? PlayType.mp4
-            : PlayType.other;
-    return PlayItem(url: url, type: type, headers: headers);
+    return PlayItem(url: url, type: playTypeFor(url), headers: headers);
   }).toList();
 }
 

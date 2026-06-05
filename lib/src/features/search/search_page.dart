@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/app_error.dart';
 import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/error_retry_view.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../content/data/content_repository.dart';
 import '../content/domain/content_models.dart';
@@ -29,6 +30,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   var _query = '';
   var _page = 1;
   var _items = <MediaItem>[];
+  var _searching = false;
   Future<List<MediaItem>>? _future;
 
   String get _sourceId {
@@ -53,13 +55,17 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   void _search({required bool reset, String? verificationCode}) {
     final query = _controller.text.trim();
-    if (query.isEmpty) return;
+    if (query.isEmpty || _searching) return;
     if (verificationCode == null) {
       _captchaController.clear();
     }
+    _searching = true;
     setState(() {
       _query = query;
       _future = _load(reset: reset, verificationCode: verificationCode);
+    });
+    _future?.whenComplete(() {
+      if (mounted) setState(() => _searching = false);
     });
   }
 
@@ -134,7 +140,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                             onRefresh: () => _search(reset: _items.isEmpty),
                           );
                         }
-                        return _ErrorView(
+                        return ErrorRetryView(
                           message: snapshot.error.toString(),
                           onRetry: () => _search(reset: _items.isEmpty),
                         );
@@ -298,36 +304,6 @@ class _CaptchaView extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorView extends StatelessWidget {
-  const _ErrorView({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline_rounded, size: 36),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重试'),
-            ),
-          ],
         ),
       ),
     );

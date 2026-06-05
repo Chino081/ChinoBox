@@ -472,7 +472,7 @@ class LibvioParser extends GenericMaccmsParser {
     return urls
         .map((url) => PlayItem(
               url: url,
-              type: _playTypeFor(url),
+              type: playTypeFor(url),
             ))
         .toList();
   }
@@ -503,13 +503,6 @@ class LibvioParser extends GenericMaccmsParser {
     } catch (_) {
       return normalized;
     }
-  }
-
-  PlayType _playTypeFor(String url) {
-    final lower = url.toLowerCase();
-    if (lower.contains('.m3u8')) return PlayType.m3u8;
-    if (lower.contains('.mp4')) return PlayType.mp4;
-    return PlayType.other;
   }
 }
 

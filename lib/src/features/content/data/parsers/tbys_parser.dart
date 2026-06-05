@@ -38,8 +38,8 @@ class TbysParser extends GenericMaccmsParser {
           .add(HomeSection(title: title.isEmpty ? '推荐' : title, items: items));
     }
 
-    if (sections.isNotEmpty) return _dedupeSections(sections);
-    final fallback = _parseVodCards(_root(document), base);
+    if (sections.isNotEmpty) return dedupeSections(sections);
+    final fallback = _parseVodCards(rootElement(document), base);
     return fallback.isEmpty
         ? const []
         : [HomeSection(title: '推荐', items: fallback.take(36).toList())];
@@ -48,15 +48,15 @@ class TbysParser extends GenericMaccmsParser {
   @override
   List<MediaItem> parseList(Document document, AppSettings settings) {
     final base = domain(settings);
-    final cards = _parseVodCards(_root(document), base);
+    final cards = _parseVodCards(rootElement(document), base);
     if (cards.isNotEmpty) return cards;
-    return _parseSearchItems(_root(document), base);
+    return _parseSearchItems(rootElement(document), base);
   }
 
   @override
   MediaDetail parseDetail(Document document, AppSettings settings, String url) {
     final base = domain(settings);
-    final root = _root(document);
+    final root = rootElement(document);
     final resolved = absolutize(url, base);
     final title = firstNonEmpty([
       attrOf(root, '.column .box img', 'alt'),
@@ -104,7 +104,7 @@ class TbysParser extends GenericMaccmsParser {
     int groupIndex,
     String currentUrl,
   ) {
-    final groups = _parseEpisodeGroups(_root(document), domain(settings));
+    final groups = _parseEpisodeGroups(rootElement(document), domain(settings));
     if (groupIndex >= 0 && groupIndex < groups.length) {
       return groups[groupIndex].episodes;
     }
@@ -236,15 +236,6 @@ class TbysParser extends GenericMaccmsParser {
     }
     return episodes;
   }
-}
-
-List<HomeSection> _dedupeSections(List<HomeSection> sections) {
-  final seen = <String>{};
-  return sections.where((section) => seen.add(section.title)).toList();
-}
-
-Element _root(Document document) {
-  return document.body ?? document.documentElement ?? Element.tag('html');
 }
 
 Element _sectionRoot(Element element) {

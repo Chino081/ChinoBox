@@ -124,15 +124,14 @@ const sourceCatalog = <MediaSource>[
   ),
 ];
 
+final Map<String, MediaSource> _sourceByIdMap = {
+  for (final source in sourceCatalog) source.id: source,
+};
+
 List<MediaSource> visibleSourceCatalog() {
   return sourceCatalog.where((source) => source.visible).toList();
 }
 
 MediaSource sourceById(String id) {
-  return sourceCatalog.firstWhere(
-    (source) => source.id == id,
-    orElse: () => sourceCatalog.firstWhere(
-      (source) => source.id == defaultSourceId,
-    ),
-  );
+  return _sourceByIdMap[id] ?? _sourceByIdMap[defaultSourceId]!;
 }

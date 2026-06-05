@@ -1,5 +1,7 @@
 import 'package:html/dom.dart';
 
+import '../domain/content_models.dart';
+
 String cleanText(String value) {
   return value.replaceAll(RegExp(r'\s+'), ' ').trim();
 }
@@ -61,4 +63,20 @@ String _extractCssUrl(String value) {
   if (cssMatch != null) return cssMatch.group(2) ?? value;
   final match = RegExp(r'https?:[^) ;]+').firstMatch(value);
   return match?.group(0) ?? value;
+}
+
+List<HomeSection> dedupeSections(List<HomeSection> sections) {
+  final seen = <String>{};
+  return sections.where((section) => seen.add(section.title)).toList();
+}
+
+Element rootElement(Document document) {
+  return document.body ?? document.documentElement ?? Element.tag('html');
+}
+
+PlayType playTypeFor(String url) {
+  final lower = url.toLowerCase();
+  if (lower.contains('.m3u8')) return PlayType.m3u8;
+  if (lower.contains('.mp4')) return PlayType.mp4;
+  return PlayType.other;
 }

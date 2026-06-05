@@ -57,7 +57,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _SectionTitle('网络'),
+          const _SectionTitle('网络'),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -120,7 +120,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
             ),
           ),
-          _SectionTitle('播放器'),
+          const _SectionTitle('播放器'),
           Card(
             child: Column(
               children: [
@@ -174,7 +174,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
           ),
-          _SectionTitle('当前站点'),
+          const _SectionTitle('当前站点'),
           Card(
             child: Column(
               children: [
@@ -246,7 +246,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
           ),
-          _SectionTitle('体验'),
+          const _SectionTitle('体验'),
           Card(
             child: Column(
               children: [
@@ -304,7 +304,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
           ),
-          _SectionTitle('声明'),
+          const _SectionTitle('声明'),
           const Card(
             child: Padding(
               padding: EdgeInsets.all(12),

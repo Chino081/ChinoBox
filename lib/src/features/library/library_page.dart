@@ -198,7 +198,16 @@ class _Thumb extends StatelessWidget {
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 child: const Icon(Icons.movie_outlined),
               )
-            : Image.network(url, fit: BoxFit.cover),
+            : Image.network(
+                url,
+                fit: BoxFit.cover,
+                cacheWidth: 96,
+                errorBuilder: (_, __, ___) => ColoredBox(
+                  color:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: const Icon(Icons.movie_outlined),
+                ),
+              ),
       ),
     );
   }

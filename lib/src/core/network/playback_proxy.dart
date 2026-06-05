@@ -1,20 +1,30 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../logging/app_logger.dart';
+import 'proxy_helper.dart';
+
 class PlaybackProxy {
   PlaybackProxy._();
 
   static final PlaybackProxy instance = PlaybackProxy._();
 
+  static const _maxEntries = 100;
+
   HttpServer? _server;
   var _nextId = 0;
   final _entries = <String, _ProxyEntry>{};
+  HttpClient? _sharedClient;
 
   Uri? _proxy;
 
   /// Update the upstream proxy used for fetching media.
   void updateProxy(Uri? proxy) {
     _proxy = proxy;
+    final client = _sharedClient;
+    if (client != null) {
+      applyProxyToClient(client, proxy);
+    }
   }
 
   Future<String> proxiedUrl(
@@ -28,6 +38,7 @@ class PlaybackProxy {
         ? 'media.mp4'
         : targetUri.pathSegments.last;
     _entries[token] = _ProxyEntry(targetUrl, Map.of(headers));
+    _evictIfNeeded();
     return Uri(
       scheme: 'http',
       host: InternetAddress.loopbackIPv4.address,
@@ -60,9 +71,7 @@ class PlaybackProxy {
       return;
     }
 
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 12);
-    _applyProxy(client);
+    final client = _getClient();
     try {
       final upstream =
           await client.openUrl(request.method, Uri.parse(entry.url));
@@ -103,7 +112,8 @@ class PlaybackProxy {
       } else {
         await upstreamResponse.pipe(request.response);
       }
-    } catch (_) {
+    } catch (e) {
+      AppLogger.warn('代理请求失败: $e');
       try {
         request.response.statusCode = HttpStatus.badGateway;
         await request.response.close();
@@ -111,45 +121,22 @@ class PlaybackProxy {
         // The response may already be closed if the upstream stream failed.
       }
     } finally {
-      client.close(force: true);
+      _entries.remove(token);
     }
   }
 
-  void _applyProxy(HttpClient client) {
-    final proxy = _proxy;
-    if (proxy == null) return;
+  HttpClient _getClient() {
+    final existing = _sharedClient;
+    if (existing != null) return existing;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 12);
+    applyProxyToClient(client, _proxy);
+    _sharedClient = client;
+    return client;
+  }
 
-    final scheme = proxy.scheme.toLowerCase();
-    final host = proxy.host;
-    final port = proxy.hasPort
-        ? proxy.port
-        : (scheme.startsWith('socks') ? 1080 : 8080);
-    client.findProxy = (uri) {
-      if (scheme.startsWith('socks')) {
-        return 'SOCKS $host:$port';
-      }
-      return 'PROXY $host:$port';
-    };
-
-    if (proxy.userInfo.isNotEmpty) {
-      final parts = proxy.userInfo.split(':');
-      final user = Uri.decodeComponent(parts.first);
-      final password = Uri.decodeComponent(
-          parts.length > 1 ? parts.sublist(1).join(':') : '');
-      client.authenticateProxy = (
-        String host,
-        int port,
-        String scheme,
-        String? realm,
-      ) async {
-        client.addProxyCredentials(
-          host,
-          port,
-          realm ?? '',
-          HttpClientBasicCredentials(user, password),
-        );
-        return true;
-      };
+  void _evictIfNeeded() {
+    while (_entries.length > _maxEntries) {
+      _entries.remove(_entries.keys.first);
     }
   }
 

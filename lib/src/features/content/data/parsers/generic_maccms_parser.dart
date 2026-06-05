@@ -71,22 +71,22 @@ class GenericMaccmsParser extends SiteParser {
       sections
           .add(HomeSection(title: title.isEmpty ? '推荐' : title, items: items));
     }
-    if (sections.isNotEmpty) return _dedupeSections(sections);
+    if (sections.isNotEmpty) return dedupeSections(sections);
 
-    final items = _parseItems(_root(document), base);
+    final items = _parseItems(rootElement(document), base);
     if (items.isEmpty) return const [];
     return [HomeSection(title: '推荐', items: items.take(36).toList())];
   }
 
   @override
   List<MediaItem> parseList(Document document, AppSettings settings) {
-    return _parseItems(_root(document), domain(settings));
+    return _parseItems(rootElement(document), domain(settings));
   }
 
   @override
   MediaDetail parseDetail(Document document, AppSettings settings, String url) {
     final base = domain(settings);
-    final root = _root(document);
+    final root = rootElement(document);
     final title = firstNonEmpty([
       textOf(root, '.stui-content__detail h1'),
       textOf(root, '.module-info-heading h1'),
@@ -134,7 +134,7 @@ class GenericMaccmsParser extends SiteParser {
     int groupIndex,
     String currentUrl,
   ) {
-    final groups = _parseEpisodeGroups(_root(document), domain(settings));
+    final groups = _parseEpisodeGroups(rootElement(document), domain(settings));
     if (groupIndex >= 0 && groupIndex < groups.length) {
       return groups[groupIndex].episodes;
     }
@@ -219,17 +219,4 @@ class GenericMaccmsParser extends SiteParser {
     }
     return episodes;
   }
-}
-
-List<HomeSection> _dedupeSections(List<HomeSection> sections) {
-  final seenTitles = <String>{};
-  return sections.where((section) {
-    if (seenTitles.contains(section.title)) return false;
-    seenTitles.add(section.title);
-    return true;
-  }).toList();
-}
-
-Element _root(Document document) {
-  return document.body ?? document.documentElement ?? Element.tag('html');
 }

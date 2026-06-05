@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/router.dart';
 import '../../shared/widgets/empty_state.dart';
+import '../../shared/widgets/error_retry_view.dart';
 import '../../shared/widgets/poster_card.dart';
 import '../content/data/content_repository.dart';
 import '../content/domain/content_models.dart';
@@ -47,7 +48,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
-            return _DetailError(
+            return ErrorRetryView(
               message: snapshot.error.toString(),
               onRetry: () => setState(() {
                 _future = ref
@@ -107,7 +108,17 @@ class _DetailBodyState extends ConsumerState<_DetailBody> {
                             .surfaceContainerHighest,
                         child: const Icon(Icons.movie_outlined, size: 48),
                       )
-                    : Image.network(detail.poster, fit: BoxFit.cover),
+                    : Image.network(
+                        detail.poster,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => ColoredBox(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          child:
+                              const Icon(Icons.movie_outlined, size: 48),
+                        ),
+                      ),
               ),
             );
             final info = _InfoBlock(
@@ -429,34 +440,4 @@ String _encodeEpisodeList(List<Episode> episodes) {
           })
       .toList();
   return base64Url.encode(utf8.encode(jsonEncode(json)));
-}
-
-class _DetailError extends StatelessWidget {
-  const _DetailError({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline_rounded, size: 36),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重试'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

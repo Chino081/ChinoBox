@@ -116,6 +116,7 @@ class _PosterImage extends StatelessWidget {
     return Image.network(
       url,
       fit: BoxFit.cover,
+      cacheWidth: 284,
       errorBuilder: (context, error, stackTrace) => ColoredBox(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: Icon(

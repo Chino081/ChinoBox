@@ -13,31 +13,44 @@ import 'parser_registry.dart';
 import 'site_parser.dart';
 
 final contentRepositoryProvider = Provider<ContentRepository>((ref) {
-  final settings = ref.watch(settingsControllerProvider);
-  return ContentRepository(
-    settings: settings,
-    store: LocalStore.instance,
-    client: MoviesHttpClient(settings),
-  );
+  return ContentRepository(ref: ref, store: LocalStore.instance);
 });
 
 class ContentRepository {
   ContentRepository({
-    required this.settings,
+    required this.ref,
     required this.store,
-    required this.client,
-  }) : _directClient = MoviesHttpClient(settings, noProxy: true);
+  });
 
-  final AppSettings settings;
+  final Ref ref;
   final LocalStore store;
-  final MoviesHttpClient client;
-  final MoviesHttpClient _directClient;
+
+  AppSettings get _settings => ref.read(settingsControllerProvider);
+
+  MoviesHttpClient? _client;
+  MoviesHttpClient? _directClient;
+  String? _lastProxy;
+
+  MoviesHttpClient get client {
+    final proxy = proxyFromSettings(_settings);
+    final proxyKey = proxy?.toString() ?? '';
+    if (_client == null || _lastProxy != proxyKey) {
+      _client = MoviesHttpClient(_settings);
+      _lastProxy = proxyKey;
+    }
+    return _client!;
+  }
+
+  MoviesHttpClient get _direct {
+    _directClient ??= MoviesHttpClient(_settings, noProxy: true);
+    return _directClient!;
+  }
 
   MoviesHttpClient clientFor(SiteParser parser) =>
-      parser.needsProxy ? client : _directClient;
+      parser.needsProxy ? client : _direct;
 
   SiteParser parserFor([String? sourceId]) {
-    return ParserRegistry.byId(sourceId ?? settings.sourceId);
+    return ParserRegistry.byId(sourceId ?? _settings.sourceId);
   }
 
   Future<HomePayload> home([String? sourceId]) async {
@@ -50,9 +63,9 @@ class ContentRepository {
         notice: parser.source.message,
       );
     }
-    final body = await _fetch(parser.homeUrl(settings), parser);
+    final body = await _fetch(parser.homeUrl(_settings), parser);
     final document = html_parser.parse(body);
-    final sections = parser.parseHome(document, settings);
+    final sections = parser.parseHome(document, _settings);
     return HomePayload(
       sourceId: parser.source.id,
       sections: sections,
@@ -76,7 +89,7 @@ class ContentRepository {
           parser.source.message.isEmpty ? '当前站点不可用' : parser.source.message);
     }
     final code = verificationCode?.trim() ?? '';
-    final rawSearchUrl = parser.searchUrl(settings, query, page);
+    final rawSearchUrl = parser.searchUrl(_settings, query, page);
     var url = rawSearchUrl;
     String body;
     if (code.isEmpty) {
@@ -84,7 +97,7 @@ class ContentRepository {
     } else {
       final verifiedBody = await parser.loadVerifiedSearchBody(
         clientFor(parser),
-        settings,
+        _settings,
         query,
         page,
         code,
@@ -92,17 +105,17 @@ class ContentRepository {
       if (verifiedBody != null) {
         body = verifiedBody;
       } else {
-        url = parser.verifiedSearchUrl(settings, query, page, code);
+        url = parser.verifiedSearchUrl(_settings, query, page, code);
         body = await _fetch(url, parser, useCache: false);
       }
     }
     final document = html_parser.parse(body);
-    final captchaUrl = parser.searchCaptchaImageUrl(document, settings, url);
+    final captchaUrl = parser.searchCaptchaImageUrl(document, _settings, url);
     if (captchaUrl != null) {
       final imageBytes = await clientFor(parser).getBytes(
         captchaUrl,
         headers: {
-          ...parser.requestHeaders(settings),
+          ...parser.requestHeaders(_settings),
           'Referer': url,
         },
       );
@@ -112,7 +125,7 @@ class ContentRepository {
         message: code.isEmpty ? '请输入验证码后继续搜索' : '验证码不正确，请重新输入',
       );
     }
-    return parser.parseList(document, settings);
+    return parser.parseList(document, _settings);
   }
 
   Future<List<MediaItem>> browse(String sourceId, String path, int page) async {
@@ -121,8 +134,9 @@ class ContentRepository {
       throw AppError(
           parser.source.message.isEmpty ? '当前站点不可用' : parser.source.message);
     }
-    final body = await _fetch(parser.categoryUrl(settings, path, page), parser);
-    return parser.parseList(html_parser.parse(body), settings);
+    final body =
+        await _fetch(parser.categoryUrl(_settings, path, page), parser);
+    return parser.parseList(html_parser.parse(body), _settings);
   }
 
   Future<MediaDetail> detail(String sourceId, String url) async {
@@ -131,30 +145,39 @@ class ContentRepository {
       throw AppError(
           parser.source.message.isEmpty ? '当前站点不可用' : parser.source.message);
     }
-    final resolved = parser.detailPageUrl(settings, url);
+    final resolved = parser.detailPageUrl(_settings, url);
     final body = await _fetch(resolved, parser);
-    return parser.parseDetail(html_parser.parse(body), settings, resolved);
+    return parser.parseDetail(html_parser.parse(body), _settings, resolved);
   }
 
   Future<List<PlayItem>> playItems(String sourceId, String episodeUrl) async {
     final parser = parserFor(sourceId);
-    final items = await parser.loadPlayItems(clientFor(parser), settings, episodeUrl);
+    final items =
+        await parser.loadPlayItems(clientFor(parser), _settings, episodeUrl);
     if (items.isEmpty) {
       throw AppError('未找到可直接播放的公开视频地址');
     }
     return items;
   }
 
+  // --- Favorites cache ---
+  Set<String>? _favoriteIdCache;
+  List<FavoriteEntry>? _favoriteListCache;
+
   Future<List<FavoriteEntry>> favorites() async {
+    if (_favoriteListCache != null) return _favoriteListCache!;
     final list = await store.readFavorites();
-    return list.map(FavoriteEntry.fromJson).toList()
+    _favoriteListCache = list.map(FavoriteEntry.fromJson).toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return _favoriteListCache!;
   }
 
   Future<bool> isFavorite(String sourceId, String detailUrl) async {
     final id = _entryId(sourceId, detailUrl);
+    if (_favoriteIdCache != null) return _favoriteIdCache!.contains(id);
     final list = await favorites();
-    return list.any((item) => item.id == id);
+    _favoriteIdCache = list.map((item) => item.id).toSet();
+    return _favoriteIdCache!.contains(id);
   }
 
   Future<void> toggleFavorite(MediaDetail detail, String sourceId) async {
@@ -177,12 +200,19 @@ class ContentRepository {
       );
     }
     await store.writeFavorites(list.map((item) => item.toJson()).toList());
+    _favoriteListCache = null;
+    _favoriteIdCache = null;
   }
 
+  // --- History cache ---
+  List<HistoryEntry>? _historyCache;
+
   Future<List<HistoryEntry>> history() async {
+    if (_historyCache != null) return _historyCache!;
     final list = await store.readHistory();
-    return list.map(HistoryEntry.fromJson).toList()
+    _historyCache = list.map(HistoryEntry.fromJson).toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return _historyCache!;
   }
 
   Future<void> saveHistory(HistoryEntry entry) async {
@@ -191,6 +221,7 @@ class ContentRepository {
     list.add(entry);
     await store
         .writeHistory(list.take(300).map((item) => item.toJson()).toList());
+    _historyCache = null;
   }
 
   Future<void> clearCache() => store.clearCache();
@@ -203,13 +234,13 @@ class ContentRepository {
   }) async {
     if (url.isEmpty) throw AppError('访问地址为空');
     final key = base64Url.encode(utf8.encode(url));
-    if (useCache && settings.cacheEnabled) {
+    if (useCache && _settings.cacheEnabled) {
       final cached = await store.readCache(key, maxAge);
       if (cached != null) return cached;
     }
-    final body =
-        await clientFor(parser).getText(url, headers: parser.requestHeaders(settings));
-    if (useCache && settings.cacheEnabled && body.isNotEmpty) {
+    final body = await clientFor(parser)
+        .getText(url, headers: parser.requestHeaders(_settings));
+    if (useCache && _settings.cacheEnabled && body.isNotEmpty) {
       await store.writeCache(key, body);
     }
     return body;
@@ -220,6 +251,9 @@ String _entryId(String sourceId, String url) {
   return base64Url.encode(utf8.encode('$sourceId::$url'));
 }
 
-final homeProvider = FutureProvider.autoDispose<HomePayload>((ref) async {
-  return ref.watch(contentRepositoryProvider).home();
+final homeProvider = FutureProvider.autoDispose<HomePayload>((ref) {
+  final sourceId = ref.watch(
+    settingsControllerProvider.select((s) => s.sourceId),
+  );
+  return ref.read(contentRepositoryProvider).home(sourceId);
 });

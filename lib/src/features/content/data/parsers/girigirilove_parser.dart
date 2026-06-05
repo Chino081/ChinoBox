@@ -27,7 +27,7 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
     AppSettings settings,
     String responseUrl,
   ) {
-    final root = _root(document);
+    final root = rootElement(document);
     final input = root.querySelector('input[name="verify"], .ds-verify');
     final image = root.querySelector('img.ds-verify-img, img[src*="/verify/"]');
     if (input == null || image == null) return null;
@@ -103,8 +103,8 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
       );
     }
 
-    if (sections.isNotEmpty) return _dedupeSections(sections);
-    final fallback = _parsePublicItems(_root(document), base);
+    if (sections.isNotEmpty) return dedupeSections(sections);
+    final fallback = _parsePublicItems(rootElement(document), base);
     return fallback.isEmpty
         ? const []
         : [HomeSection(title: '推荐', items: fallback.take(36).toList())];
@@ -113,7 +113,7 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
   @override
   List<MediaItem> parseList(Document document, AppSettings settings) {
     final base = domain(settings);
-    final root = _root(document);
+    final root = rootElement(document);
     final searchItems = _parseSearchItems(root, base);
     if (searchItems.isNotEmpty) return searchItems;
     return _parsePublicItems(root, base);
@@ -122,7 +122,7 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
   @override
   MediaDetail parseDetail(Document document, AppSettings settings, String url) {
     final base = domain(settings);
-    final root = _root(document);
+    final root = rootElement(document);
     final resolved = absolutize(url, base);
     final title = firstNonEmpty([
       textOf(root, 'h3.slide-info-title'),
@@ -165,7 +165,7 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
     int groupIndex,
     String currentUrl,
   ) {
-    final groups = _parseEpisodeGroups(_root(document), domain(settings));
+    final groups = _parseEpisodeGroups(rootElement(document), domain(settings));
     if (groupIndex >= 0 && groupIndex < groups.length) {
       return groups[groupIndex].episodes;
     }
@@ -299,15 +299,6 @@ class GiriGiriLoveParser extends GenericMaccmsParser {
     }
     return episodes;
   }
-}
-
-List<HomeSection> _dedupeSections(List<HomeSection> sections) {
-  final seen = <String>{};
-  return sections.where((section) => seen.add(section.title)).toList();
-}
-
-Element _root(Document document) {
-  return document.body ?? document.documentElement ?? Element.tag('html');
 }
 
 String _cleanGroupTitle(Element element) {

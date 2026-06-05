@@ -279,7 +279,7 @@ class YjysParser extends SiteParser {
       final cleaned = _cleanPlayUrl(value, base);
       if (cleaned.isEmpty || !cleaned.startsWith('http')) return;
       if (seen.add(cleaned)) {
-        items.add(PlayItem(url: cleaned, type: _playType(cleaned)));
+        items.add(PlayItem(url: cleaned, type: playTypeFor(cleaned)));
       }
     }
 
@@ -313,12 +313,5 @@ class YjysParser extends SiteParser {
     final withoutName = value.split('#').first.trim();
     if (withoutName.isEmpty) return '';
     return withoutName.replaceFirst('https://www.bde4.cc', base);
-  }
-
-  PlayType _playType(String url) {
-    final lower = url.toLowerCase();
-    if (lower.contains('.m3u8')) return PlayType.m3u8;
-    if (lower.contains('.mp4')) return PlayType.mp4;
-    return PlayType.other;
   }
 }

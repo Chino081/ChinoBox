@@ -9,6 +9,7 @@ import 'package:media_kit/media_kit.dart' as media_kit;
 import 'package:media_kit_video/media_kit_video.dart' as media_video;
 import 'package:window_manager/window_manager.dart';
 
+import '../../core/logging/app_logger.dart';
 import '../../core/network/movies_http_client.dart';
 import '../../core/network/playback_proxy.dart';
 import '../content/data/content_repository.dart';
@@ -84,6 +85,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   _ResolvedMedia? _activeMedia;
   var _position = Duration.zero;
   var _duration = Duration.zero;
+  final _positionNotifier = ValueNotifier<Duration>(Duration.zero);
+  final _durationNotifier = ValueNotifier<Duration>(Duration.zero);
   var _rate = 1.0;
   var _savedRate = 1.0;
   var _isLongPressSpeed = false;
@@ -114,6 +117,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     _currentPlayHeaders = Map.of(widget.playHeaders);
     _currentPlayTitle = widget.playTitle;
     _normalizeEpisodeIndex();
+    PlaybackProxy.instance.updateProxy(
+      proxyFromSettings(ref.read(settingsControllerProvider)),
+    );
+    ref.listen(settingsControllerProvider, (prev, next) {
+      if (prev?.proxy != next.proxy) {
+        PlaybackProxy.instance.updateProxy(proxyFromSettings(next));
+      }
+    });
     if (_isDesktopPlatform) {
       windowManager.addListener(this);
       unawaited(_syncDesktopFullscreenState());
@@ -139,9 +150,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     if (_isDesktopPlatform) {
       windowManager.removeListener(this);
     }
-    unawaited(_saveHistory());
+    unawaited(_saveHistory().catchError(
+      (e) => AppLogger.warn('保存历史记录失败: $e'),
+    ));
     unawaited(_disposePlaybackEngines());
     unawaited(_restoreSystemUi());
+    _positionNotifier.dispose();
+    _durationNotifier.dispose();
     super.dispose();
   }
 
@@ -169,7 +184,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsControllerProvider);
-    PlaybackProxy.instance.updateProxy(proxyFromSettings(settings));
     final source = sourceById(widget.sourceId);
     final title = _titleText;
 
@@ -287,6 +301,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
         child: Image.network(
           widget.poster,
           fit: BoxFit.contain,
+          cacheWidth: 284,
           errorBuilder: (_, __, ___) {
             return const Icon(
               Icons.movie_outlined,
@@ -436,12 +451,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
   }
 
   Widget _buildControlOverlay(BuildContext context) {
-    final progressMax = _duration.inMilliseconds <= 0
-        ? 1.0
-        : _duration.inMilliseconds.toDouble();
-    final progressValue =
-        _position.inMilliseconds.clamp(0, progressMax.toInt()).toDouble();
-
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !_controlsVisible,
@@ -469,11 +478,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
                   locked: false,
                 ),
                 _buildCenterControls(),
-                _buildBottomControls(
-                  context,
-                  progressMax: progressMax,
-                  progressValue: progressValue,
-                ),
+                _buildBottomControls(context),
               ],
             ],
           ),
@@ -559,11 +564,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     );
   }
 
-  Widget _buildBottomControls(
-    BuildContext context, {
-    required double progressMax,
-    required double progressValue,
-  }) {
+  Widget _buildBottomControls(BuildContext context) {
     return Positioned(
       left: 0,
       right: 0,
@@ -583,45 +584,61 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    _buildTimeText(_formatDuration(_position)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: SliderTheme(
-                        data: SliderTheme.of(context).copyWith(
-                          activeTrackColor: const Color(0xFFFF4081),
-                          inactiveTrackColor: Colors.white30,
-                          thumbColor: const Color(0xFFFF4081),
-                          overlayColor: const Color(0x33FF4081),
-                          trackHeight: 7,
-                          thumbShape: const RoundSliderThumbShape(
-                            enabledThumbRadius: 8,
-                          ),
-                        ),
-                        child: Slider(
-                          min: 0,
-                          max: progressMax,
-                          value: progressValue,
-                          onChangeStart: (_) => _pinControls(),
-                          onChanged: (value) {
-                            _showControls(autoHide: false);
-                            setState(() {
-                              _position = Duration(milliseconds: value.round());
-                            });
-                          },
-                          onChangeEnd: (value) {
-                            unawaited(
-                              _seek(Duration(milliseconds: value.round())),
-                            );
-                            _scheduleControlsHide();
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildTimeText(_formatDuration(_duration)),
-                  ],
+                ValueListenableBuilder<Duration>(
+                  valueListenable: _positionNotifier,
+                  builder: (context, position, _) {
+                    return ValueListenableBuilder<Duration>(
+                      valueListenable: _durationNotifier,
+                      builder: (context, duration, __) {
+                        final progressMax = duration.inMilliseconds <= 0
+                            ? 1.0
+                            : duration.inMilliseconds.toDouble();
+                        final progressValue = position.inMilliseconds
+                            .clamp(0, progressMax.toInt())
+                            .toDouble();
+                        return Row(
+                          children: [
+                            _buildTimeText(_formatDuration(position)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  activeTrackColor: const Color(0xFFFF4081),
+                                  inactiveTrackColor: Colors.white30,
+                                  thumbColor: const Color(0xFFFF4081),
+                                  overlayColor: const Color(0x33FF4081),
+                                  trackHeight: 7,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 8,
+                                  ),
+                                ),
+                                child: Slider(
+                                  min: 0,
+                                  max: progressMax,
+                                  value: progressValue,
+                                  onChangeStart: (_) => _pinControls(),
+                                  onChanged: (value) {
+                                    _showControls(autoHide: false);
+                                    _positionNotifier.value =
+                                        Duration(milliseconds: value.round());
+                                  },
+                                  onChangeEnd: (value) {
+                                    unawaited(
+                                      _seek(Duration(
+                                          milliseconds: value.round())),
+                                    );
+                                    _scheduleControlsHide();
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _buildTimeText(_formatDuration(duration)),
+                          ],
+                        );
+                      },
+                    );
+                  },
                 ),
                 const SizedBox(height: 2),
                 LayoutBuilder(
@@ -863,7 +880,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
             _pendingSeek = Duration(milliseconds: entry.position);
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        AppLogger.warn('恢复播放历史失败: $e');
+      }
     }
     await _startFromSettings();
   }
@@ -954,10 +973,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
     _mediaKitSubscriptions
       ..clear()
       ..add(player.stream.position.listen((value) {
-        if (mounted) setState(() => _position = value);
+        _position = value;
+        _positionNotifier.value = value;
       }))
       ..add(player.stream.duration.listen((value) {
-        if (mounted) setState(() => _duration = value);
+        _duration = value;
+        _durationNotifier.value = value;
         if (!durationReady.isCompleted && value > Duration.zero) {
           durationReady.complete();
         }
@@ -1444,8 +1465,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
           break;
         }
       }
-    } catch (_) {
-      // History playback can still work without a detail-page episode list.
+    } catch (e) {
+      AppLogger.warn('加载选集失败: $e');
     } finally {
       _loadingEpisodes = false;
       if (mounted) setState(() {});
@@ -1466,7 +1487,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> with WindowListener {
         playUrl =
             await PlaybackProxy.instance.proxiedUrl(playUrl, effectiveHeaders);
         mediaHeaders = null;
-      } catch (_) {
+      } catch (e) {
+        AppLogger.warn('代理解析失败: $e');
         mediaHeaders = effectiveHeaders;
       }
     }
