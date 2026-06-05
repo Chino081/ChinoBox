@@ -415,7 +415,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         uri != null &&
         uri.host.toLowerCase().endsWith('vbing.me')) {
       headers.putIfAbsent('User-Agent', () => browserUserAgent);
-      headers.putIfAbsent('Referer', () => 'https://www.libvios.com/');
+      headers.putIfAbsent('Referer', () => 'https://libviobd.com/');
     }
     return headers;
   }
