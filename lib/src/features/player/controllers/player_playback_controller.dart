@@ -14,6 +14,7 @@ import '../models/resolved_media.dart';
 import '../player_platform_bridge.dart';
 import 'fullscreen_controller.dart';
 import 'playback_history_controller.dart';
+import 'player_cast_controller.dart';
 import 'player_engine_controller.dart';
 import 'player_state_controller.dart';
 
@@ -24,6 +25,7 @@ class PlayerPlaybackController {
     required this.engine,
     required this.history,
     required this.fullscreen,
+    required this.cast,
     required this.sourceId,
     required this.title,
     required this.poster,
@@ -38,6 +40,7 @@ class PlayerPlaybackController {
   final PlayerEngineController engine;
   final PlaybackHistoryController history;
   final FullscreenController fullscreen;
+  final PlayerCastController cast;
   final String sourceId;
   final String title;
   final String poster;
@@ -112,6 +115,12 @@ class PlayerPlaybackController {
       return;
     }
 
+    // If casting, route to DLNA renderer instead of local player
+    if (state.isCasting) {
+      await _openOnCast();
+      return;
+    }
+
     state.update(
       isLoading: true,
       externalOnly: false,
@@ -141,6 +150,23 @@ class PlayerPlaybackController {
         onCompleted: () => unawaited(handleCompleted()),
       );
       if (_disposed) return;
+      state.update(isLoading: false, clearError: true);
+    } catch (error) {
+      state.update(isLoading: false, error: error.toString());
+    }
+  }
+
+  Future<void> _openOnCast() async {
+    state.update(isLoading: true, clearError: true);
+    try {
+      final resolved = await _resolveMedia(
+        state.currentPlayUrl,
+        state.currentPlayHeaders,
+      );
+      if (_disposed) return;
+      _activeMedia = resolved;
+      await engine.pause();
+      await cast.castMedia(resolved.url, titleText, resolved.headers);
       state.update(isLoading: false, clearError: true);
     } catch (error) {
       state.update(isLoading: false, error: error.toString());

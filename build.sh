@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FLUTTER="$SCRIPT_DIR/../flutter/bin/flutter"
 DIST="$SCRIPT_DIR/dist"
 WIN_RELEASE="$SCRIPT_DIR/build/windows/x64/runner/Release"
-
 # Proxy (set MOVIESBOX_BUILD_PROXY to enable, e.g. http://user:pass@host:port)
 PROXY="${MOVIESBOX_BUILD_PROXY:-}"
 
@@ -29,13 +28,35 @@ done
 
 # Use JDK 21 for Android (Gradle doesn't support JDK 25)
 export JAVA_HOME="C:/Program Files/Zulu/zulu-21"
+export PATH="$JAVA_HOME/bin:$PATH"
 
 # Apply proxy for network access
 if [ -n "$PROXY" ]; then
   export http_proxy="$PROXY"
   export https_proxy="$PROXY"
   export all_proxy="$PROXY"
-  echo "[proxy] $PROXY"
+
+  PROXY_ADDR="${PROXY#*://}"
+  PROXY_AUTH=""
+  if [[ "$PROXY_ADDR" == *"@"* ]]; then
+    PROXY_AUTH="${PROXY_ADDR%@*}"
+    PROXY_ADDR="${PROXY_ADDR#*@}"
+  fi
+  PROXY_HOST="${PROXY_ADDR%%:*}"
+  PROXY_PORT="${PROXY_ADDR##*:}"
+
+  if [ -n "$PROXY_HOST" ] && [ -n "$PROXY_PORT" ] && [ "$PROXY_HOST" != "$PROXY_PORT" ]; then
+    GRADLE_PROXY_OPTS="-Dhttp.proxyHost=$PROXY_HOST -Dhttp.proxyPort=$PROXY_PORT -Dhttps.proxyHost=$PROXY_HOST -Dhttps.proxyPort=$PROXY_PORT"
+    if [ -n "$PROXY_AUTH" ]; then
+      PROXY_USER="${PROXY_AUTH%%:*}"
+      PROXY_PASS="${PROXY_AUTH#*:}"
+      GRADLE_PROXY_OPTS="$GRADLE_PROXY_OPTS -Dhttp.proxyUser=$PROXY_USER -Dhttp.proxyPassword=$PROXY_PASS -Dhttps.proxyUser=$PROXY_USER -Dhttps.proxyPassword=$PROXY_PASS"
+    fi
+    export GRADLE_OPTS="${GRADLE_OPTS:-} $GRADLE_PROXY_OPTS"
+    echo "[proxy] enabled for $PROXY_HOST:$PROXY_PORT"
+  else
+    echo "[proxy] enabled"
+  fi
 fi
 
 mkdir -p "$DIST"

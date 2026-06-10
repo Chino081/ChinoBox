@@ -2,6 +2,10 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("http://4thline.org/m2")
+            allowInsecureProtocol = true
+        }
     }
 }
 

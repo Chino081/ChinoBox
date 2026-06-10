@@ -35,13 +35,37 @@ android {
         }
     }
 
+    packaging {
+        resources {
+            excludes += ["META-INF/beans.xml"]
+        }
+    }
+
     buildTypes {
         release {
             signingConfig = signingConfigs.debug
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+repositories {
+    flatDir { dirs 'libs' }
+}
+
+dependencies {
+    // Cling UPnP
+    implementation 'org.fourthline.cling:cling-core:2.1.1'
+    implementation 'org.fourthline.cling:cling-support:2.1.1'
+    // NanoHTTPD for local media server
+    implementation files('libs/nanohttpd-2.3.1.jar')
+    // DLNA AAR modules
+    implementation(name: 'core-2.0.0-SNAPSHOT', ext: 'aar')
+    implementation(name: 'dmc-2.0.0-SNAPSHOT', ext: 'aar')
+    implementation(name: 'dmr-2.0.0-SNAPSHOT', ext: 'aar')
+    implementation(name: 'dms-2.0.0-SNAPSHOT', ext: 'aar')
 }

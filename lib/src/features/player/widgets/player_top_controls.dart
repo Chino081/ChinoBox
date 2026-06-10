@@ -5,9 +5,12 @@ class PlayerTopControls extends StatelessWidget {
     required this.titleText,
     required this.isFullscreen,
     required this.supportsPiP,
+    required this.supportsCast,
+    required this.isCasting,
     required this.onBack,
     required this.onExternal,
     required this.onPiP,
+    required this.onCast,
     required this.onFullscreen,
     super.key,
   });
@@ -15,9 +18,12 @@ class PlayerTopControls extends StatelessWidget {
   final String titleText;
   final bool isFullscreen;
   final bool supportsPiP;
+  final bool supportsCast;
+  final bool isCasting;
   final VoidCallback onBack;
   final VoidCallback onExternal;
   final VoidCallback onPiP;
+  final VoidCallback onCast;
   final VoidCallback onFullscreen;
 
   @override
@@ -68,6 +74,15 @@ class PlayerTopControls extends StatelessWidget {
                     icon: Icons.picture_in_picture_alt_rounded,
                     onPressed: onPiP,
                   ),
+                if (supportsCast)
+                  _OverlayIconButton(
+                    tooltip: isCasting ? '断开投屏' : '投屏',
+                    icon: isCasting
+                        ? Icons.cast_connected_rounded
+                        : Icons.cast_outlined,
+                    color: isCasting ? const Color(0xFFFF4081) : null,
+                    onPressed: onCast,
+                  ),
                 _OverlayIconButton(
                   tooltip: isFullscreen ? '退出全屏' : '全屏',
                   icon: isFullscreen
@@ -89,17 +104,19 @@ class _OverlayIconButton extends StatelessWidget {
     required this.tooltip,
     required this.icon,
     required this.onPressed,
+    this.color,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback onPressed;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: tooltip,
-      color: Colors.white,
+      color: color ?? Colors.white,
       onPressed: onPressed,
       icon: Icon(icon),
     );

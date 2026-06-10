@@ -12,13 +12,17 @@ import '../settings/settings_controller.dart';
 import '../source/domain/source_catalog.dart';
 import 'controllers/fullscreen_controller.dart';
 import 'controllers/playback_history_controller.dart';
+import 'controllers/player_cast_controller.dart';
 import 'controllers/player_controls_controller.dart';
 import 'controllers/player_engine_controller.dart';
 import 'controllers/player_playback_controller.dart';
 import 'controllers/player_state_controller.dart';
+import 'models/cast_state.dart';
 import 'models/player_episode_ref.dart';
 import 'player_platform_bridge.dart';
 import 'utils/player_utils.dart';
+import 'widgets/cast_control_bar.dart';
+import 'widgets/cast_device_sheet.dart';
 import 'widgets/episode_bar.dart';
 import 'widgets/episode_sheet.dart';
 import 'widgets/external_only_view.dart';
@@ -88,6 +92,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   late final PlayerPlaybackController _playback;
   late final PlayerControlsController _controls;
   late final FullscreenController _fullscreen;
+  late final PlayerCastController _cast;
 
   bool get _isDesktop =>
       Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -125,12 +130,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       playHeadersBuilder: _effectivePlayHeaders,
     );
 
+    _cast = PlayerCastController(
+      state: _state,
+      onShowMessage: _showMessage,
+    )..init();
+
     _playback = PlayerPlaybackController(
       ref: ref,
       state: _state,
       engine: _engine,
       history: history,
       fullscreen: _fullscreen,
+      cast: _cast,
       sourceId: widget.sourceId,
       title: widget.title,
       poster: widget.poster,
@@ -168,6 +179,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   @override
   void dispose() {
     _controls.dispose();
+    _cast.dispose();
     _playback.markDisposed();
     _fullscreen.markDisposed();
     unawaited(_playback.history.save());
@@ -296,6 +308,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
               ),
             ),
           if (!_state.externalOnly) _buildControlOverlay(),
+          if (_state.isCasting)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: CastControlBar(
+                deviceName: _state.connectedDevice?.name ?? '',
+                titleText: _playback.titleText,
+                transportState: _state.castTransportState,
+                position: _state.position,
+                duration: _state.duration,
+                onTogglePlayPause: () =>
+                    unawaited(_cast.togglePlayPause()),
+                onSeek: (d) => unawaited(_cast.seek(d)),
+                onDisconnect: () => unawaited(_handleCastDisconnect()),
+              ),
+            ),
         ]),
       ),
     );
@@ -308,9 +337,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
         titleText: _playback.titleText,
         isFullscreen: _state.isFullscreen,
         supportsPiP: _bridge.supportsAndroidPlayerActions,
+        supportsCast: _bridge.supportsCast,
+        isCasting: _state.isCasting,
         onBack: () => unawaited(_leavePlayerOrFullscreen()),
         onExternal: () => unawaited(_playback.openExternalPlayer()),
         onPiP: () => unawaited(_playback.enterPictureInPicture()),
+        onCast: () => unawaited(_showCastDeviceSheet()),
         onFullscreen: () =>
             unawaited(_fullscreen.setFullscreen(!_state.isFullscreen)),
       ),
@@ -360,6 +392,60 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
 
   // --- Sheets ---
 
+  Future<void> _showCastDeviceSheet() async {
+    _controls.pinControls();
+
+    if (_state.isCasting) {
+      // Already casting - show disconnect option or device list
+      final selected = await CastDeviceSheet.show(
+        context,
+        devices: _state.castDevices,
+        connectedDevice: _state.connectedDevice,
+      );
+      if (selected != null) {
+        if (selected == _state.connectedDevice) {
+          await _cast.disconnect();
+          // Resume local playback
+          if (_state.currentPlayUrl.isNotEmpty) {
+            unawaited(_playback.openCurrent());
+          }
+        } else {
+          await _cast.connectToDevice(selected);
+          if (_state.castState == CastConnectionState.connected) {
+            await _cast.castMedia(
+              _state.currentPlayUrl,
+              _playback.titleText,
+              _state.currentPlayHeaders,
+            );
+            await _engine.pause();
+          }
+        }
+      }
+    } else {
+      // Start discovery and show device list
+      await _cast.startDiscovery();
+      if (!mounted) return;
+      final selected = await CastDeviceSheet.show(
+        context,
+        devices: _state.castDevices,
+        connectedDevice: _state.connectedDevice,
+      );
+      if (selected != null) {
+        await _cast.connectToDevice(selected);
+        if (_state.castState == CastConnectionState.connected) {
+          await _cast.castMedia(
+            _state.currentPlayUrl,
+            _playback.titleText,
+            _state.currentPlayHeaders,
+          );
+          await _engine.pause();
+        }
+      }
+      await _cast.stopDiscovery();
+    }
+    _controls.showControls();
+  }
+
   Future<void> _showSpeedMenu() async {
     _controls.pinControls();
     final selected = await SpeedSheet.show(context, _state.rate);
@@ -396,6 +482,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
   }
 
   // --- Helpers ---
+
+  Future<void> _handleCastDisconnect() async {
+    await _cast.disconnect();
+    // Resume local playback from cast position
+    if (_state.currentPlayUrl.isNotEmpty) {
+      unawaited(_playback.openCurrent());
+    }
+  }
 
   Future<void> _leavePlayerOrFullscreen() async {
     if (_state.isFullscreen) {

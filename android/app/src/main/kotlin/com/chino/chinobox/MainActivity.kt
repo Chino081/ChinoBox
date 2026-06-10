@@ -7,14 +7,21 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import com.chino.chinobox.dlna.DLNAManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private lateinit var dlnaManager: DLNAManager
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        dlnaManager = DLNAManager(this)
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.chino.chinobox/player"
@@ -22,9 +29,25 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "openExternal" -> openExternal(call, result)
                 "enterPictureInPicture" -> enterPictureInPicture(result)
+                "dlnaStartDiscovery" -> dlnaStartDiscovery(result)
+                "dlnaStopDiscovery" -> dlnaStopDiscovery(result)
+                "dlnaConnect" -> dlnaConnect(call, result)
+                "dlnaDisconnect" -> dlnaDisconnect(result)
+                "dlnaSetMedia" -> dlnaSetMedia(call, result)
+                "dlnaPlay" -> dlnaPlay(result)
+                "dlnaPause" -> dlnaPause(result)
+                "dlnaStop" -> dlnaStop(result)
+                "dlnaSeek" -> dlnaSeek(call, result)
+                "dlnaSetVolume" -> dlnaSetVolume(call, result)
+                "dlnaGetVolume" -> dlnaGetVolume(result)
                 else -> result.notImplemented()
             }
         }
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.chino.chinobox/dlna_events"
+        ).setStreamHandler(dlnaManager.eventStreamHandler)
     }
 
     private fun openExternal(call: MethodCall, result: MethodChannel.Result) {
@@ -84,5 +107,88 @@ class MainActivity : FlutterActivity() {
             lower.contains(".mkv") -> "video/x-matroska"
             else -> "video/*"
         }
+    }
+
+    // --- DLNA Methods ---
+
+    private fun dlnaStartDiscovery(result: MethodChannel.Result) {
+        try {
+            dlnaManager.bind()
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("dlna_discovery_failed", e.message, null)
+        }
+    }
+
+    private fun dlnaStopDiscovery(result: MethodChannel.Result) {
+        try {
+            dlnaManager.unbind()
+            result.success(null)
+        } catch (e: Exception) {
+            result.error("dlna_stop_failed", e.message, null)
+        }
+    }
+
+    private fun dlnaConnect(call: MethodCall, result: MethodChannel.Result) {
+        val udn = call.argument<String>("udn")
+        if (udn.isNullOrBlank()) {
+            result.error("invalid_udn", "设备ID为空", null)
+            return
+        }
+        dlnaManager.connect(udn, result)
+    }
+
+    private fun dlnaDisconnect(result: MethodChannel.Result) {
+        dlnaManager.disconnect(result)
+    }
+
+    private fun dlnaSetMedia(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")
+        if (url.isNullOrBlank()) {
+            result.error("invalid_url", "播放地址为空", null)
+            return
+        }
+        val title = call.argument<String>("title") ?: ""
+        val headers = call.argument<Map<String, String>>("headers") ?: emptyMap()
+        dlnaManager.setMedia(url, title, headers, result)
+    }
+
+    private fun dlnaPlay(result: MethodChannel.Result) {
+        dlnaManager.play(result)
+    }
+
+    private fun dlnaPause(result: MethodChannel.Result) {
+        dlnaManager.pause(result)
+    }
+
+    private fun dlnaStop(result: MethodChannel.Result) {
+        dlnaManager.stop(result)
+    }
+
+    private fun dlnaSeek(call: MethodCall, result: MethodChannel.Result) {
+        val positionMs = call.argument<Number>("positionMs")?.toLong()
+        if (positionMs == null) {
+            result.error("invalid_position", "进度值无效", null)
+            return
+        }
+        dlnaManager.seek(positionMs, result)
+    }
+
+    private fun dlnaSetVolume(call: MethodCall, result: MethodChannel.Result) {
+        val volume = call.argument<Number>("volume")?.toInt()
+        if (volume == null) {
+            result.error("invalid_volume", "音量值无效", null)
+            return
+        }
+        dlnaManager.setVolume(volume, result)
+    }
+
+    private fun dlnaGetVolume(result: MethodChannel.Result) {
+        dlnaManager.getVolume(result)
+    }
+
+    override fun onDestroy() {
+        dlnaManager.unbind()
+        super.onDestroy()
     }
 }

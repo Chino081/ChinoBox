@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/cast_state.dart';
 import '../models/player_episode_ref.dart';
 import '../models/video_fit_mode.dart';
 
@@ -153,6 +154,37 @@ class PlayerStateController extends ChangeNotifier {
   bool get completionHandled => _completionHandled;
   set completionHandled(bool value) => _completionHandled = value;
 
+  // Cast state
+  CastConnectionState _castState = CastConnectionState.disconnected;
+  CastConnectionState get castState => _castState;
+  set castState(CastConnectionState value) {
+    _castState = value;
+    notifyListeners();
+  }
+
+  List<CastDevice> _castDevices = [];
+  List<CastDevice> get castDevices => _castDevices;
+  set castDevices(List<CastDevice> value) {
+    _castDevices = value;
+    notifyListeners();
+  }
+
+  CastDevice? _connectedDevice;
+  CastDevice? get connectedDevice => _connectedDevice;
+  set connectedDevice(CastDevice? value) {
+    _connectedDevice = value;
+    notifyListeners();
+  }
+
+  CastTransportState _castTransportState = CastTransportState.idle;
+  CastTransportState get castTransportState => _castTransportState;
+  set castTransportState(CastTransportState value) {
+    _castTransportState = value;
+    notifyListeners();
+  }
+
+  bool get isCasting => _castState == CastConnectionState.connected;
+
   bool get hasNext =>
       _episodeIndex >= 0 && _episodeIndex + 1 < _episodes.length;
 
@@ -180,6 +212,11 @@ class PlayerStateController extends ChangeNotifier {
     String? currentPlayTitle,
     bool? loadingEpisodes,
     bool? completionHandled,
+    CastConnectionState? castState,
+    List<CastDevice>? castDevices,
+    CastDevice? connectedDevice,
+    bool clearConnectedDevice = false,
+    CastTransportState? castTransportState,
   }) {
     if (position != null) {
       _position = position;
@@ -209,6 +246,11 @@ class PlayerStateController extends ChangeNotifier {
     if (currentPlayTitle != null) _currentPlayTitle = currentPlayTitle;
     if (loadingEpisodes != null) _loadingEpisodes = loadingEpisodes;
     if (completionHandled != null) _completionHandled = completionHandled;
+    if (castState != null) _castState = castState;
+    if (castDevices != null) _castDevices = castDevices;
+    if (clearConnectedDevice) _connectedDevice = null;
+    if (connectedDevice != null) _connectedDevice = connectedDevice;
+    if (castTransportState != null) _castTransportState = castTransportState;
     notifyListeners();
   }
 

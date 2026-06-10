@@ -1,0 +1,20 @@
+# Cling contains optional CDI, Servlet, and Jetty transports that are not used on Android.
+-dontwarn javax.enterprise.context.ApplicationScoped
+-dontwarn javax.enterprise.inject.Alternative
+-dontwarn javax.inject.Inject
+-dontwarn javax.servlet.Servlet
+-dontwarn javax.servlet.http.HttpServlet
+-dontwarn org.eclipse.jetty.client.ContentExchange
+-dontwarn org.eclipse.jetty.client.HttpClient
+-dontwarn org.eclipse.jetty.client.HttpExchange
+-dontwarn org.eclipse.jetty.http.HttpFields
+-dontwarn org.eclipse.jetty.io.Buffer
+-dontwarn org.eclipse.jetty.io.ByteArrayBuffer
+-dontwarn org.eclipse.jetty.server.Connector
+-dontwarn org.eclipse.jetty.server.Handler
+-dontwarn org.eclipse.jetty.server.Server
+-dontwarn org.eclipse.jetty.server.bio.SocketConnector
+-dontwarn org.eclipse.jetty.servlet.ServletContextHandler
+-dontwarn org.eclipse.jetty.servlet.ServletHolder
+-dontwarn org.eclipse.jetty.util.thread.ExecutorThreadPool
+-dontwarn org.eclipse.jetty.util.thread.ThreadPool
