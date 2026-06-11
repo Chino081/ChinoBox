@@ -1,32 +1,62 @@
 import 'package:flutter/material.dart';
 
+import '../controllers/player_state_controller.dart';
 import '../models/cast_state.dart';
 
 class CastDeviceSheet extends StatelessWidget {
   const CastDeviceSheet({
-    required this.devices,
-    required this.connectedDevice,
+    required this.state,
+    required this.onRefresh,
     super.key,
   });
 
-  final List<CastDevice> devices;
-  final CastDevice? connectedDevice;
+  final PlayerStateController state;
+  final VoidCallback onRefresh;
 
   static Future<CastDevice?> show(
     BuildContext context, {
-    required List<CastDevice> devices,
-    CastDevice? connectedDevice,
+    required PlayerStateController state,
+    required VoidCallback onRefresh,
   }) {
     return showModalBottomSheet<CastDevice>(
       context: context,
       backgroundColor: const Color(0xFF101010),
       showDragHandle: true,
       builder: (_) => CastDeviceSheet(
-        devices: devices,
-        connectedDevice: connectedDevice,
+        state: state,
+        onRefresh: onRefresh,
       ),
     );
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: state,
+      builder: (context, _) {
+        final devices = state.castDevices;
+        final connectedDevice = state.connectedDevice;
+
+        return _CastDeviceSheetBody(
+          devices: devices,
+          connectedDevice: connectedDevice,
+          onRefresh: onRefresh,
+        );
+      },
+    );
+  }
+}
+
+class _CastDeviceSheetBody extends StatelessWidget {
+  const _CastDeviceSheetBody({
+    required this.devices,
+    required this.connectedDevice,
+    required this.onRefresh,
+  });
+
+  final List<CastDevice> devices;
+  final CastDevice? connectedDevice;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +86,13 @@ class CastDeviceSheet extends StatelessWidget {
                       color: Colors.white54,
                     ),
                   ),
+                const Spacer(),
+                IconButton(
+                  tooltip: '重新搜索',
+                  icon: const Icon(Icons.refresh_rounded),
+                  color: Colors.white70,
+                  onPressed: onRefresh,
+                ),
               ],
             ),
             const SizedBox(height: 12),

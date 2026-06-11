@@ -3,6 +3,7 @@ package com.chino.chinobox
 import android.app.PictureInPictureParams
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -15,7 +16,14 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    companion object {
+        private const val REQUEST_NEARBY_WIFI_DEVICES = 2301
+        private const val PERMISSION_NEARBY_WIFI_DEVICES = "android.permission.NEARBY_WIFI_DEVICES"
+        private const val SDK_TIRAMISU = 33
+    }
+
     private lateinit var dlnaManager: DLNAManager
+    private var pendingDlnaStartResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -112,12 +120,66 @@ class MainActivity : FlutterActivity() {
     // --- DLNA Methods ---
 
     private fun dlnaStartDiscovery(result: MethodChannel.Result) {
+        if (!ensureDlnaDiscoveryPermission(result)) return
+
+        startDlnaDiscovery(result)
+    }
+
+    private fun startDlnaDiscovery(result: MethodChannel.Result) {
         try {
             dlnaManager.bind()
             result.success(null)
         } catch (e: Exception) {
             result.error("dlna_discovery_failed", e.message, null)
         }
+    }
+
+    private fun ensureDlnaDiscoveryPermission(result: MethodChannel.Result): Boolean {
+        if (Build.VERSION.SDK_INT < SDK_TIRAMISU) return true
+        if (checkSelfPermission(PERMISSION_NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED) {
+            return true
+        }
+        if (pendingDlnaStartResult != null) {
+            result.error("permission_request_in_progress", "正在请求投屏权限", null)
+            return false
+        }
+
+        pendingDlnaStartResult = result
+        try {
+            requestPermissions(
+                arrayOf(PERMISSION_NEARBY_WIFI_DEVICES),
+                REQUEST_NEARBY_WIFI_DEVICES
+            )
+        } catch (error: Exception) {
+            pendingDlnaStartResult = null
+            result.error("permission_request_failed", error.message, null)
+        }
+        return false
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        if (requestCode == REQUEST_NEARBY_WIFI_DEVICES) {
+            val result = pendingDlnaStartResult
+            pendingDlnaStartResult = null
+            if (result == null) return
+
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                startDlnaDiscovery(result)
+            } else {
+                result.error(
+                    "nearby_wifi_permission_denied",
+                    "未授权附近设备权限，无法搜索投屏设备",
+                    null
+                )
+            }
+            return
+        }
+
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
     private fun dlnaStopDiscovery(result: MethodChannel.Result) {

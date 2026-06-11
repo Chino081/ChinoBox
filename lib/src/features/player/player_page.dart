@@ -399,8 +399,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       // Already casting - show disconnect option or device list
       final selected = await CastDeviceSheet.show(
         context,
-        devices: _state.castDevices,
-        connectedDevice: _state.connectedDevice,
+        state: _state,
+        onRefresh: () => unawaited(_cast.startDiscovery()),
       );
       if (selected != null) {
         if (selected == _state.connectedDevice) {
@@ -423,12 +423,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage> {
       }
     } else {
       // Start discovery and show device list
-      await _cast.startDiscovery();
+      final didStartDiscovery = await _cast.startDiscovery();
+      if (!didStartDiscovery) {
+        _controls.showControls();
+        return;
+      }
       if (!mounted) return;
       final selected = await CastDeviceSheet.show(
         context,
-        devices: _state.castDevices,
-        connectedDevice: _state.connectedDevice,
+        state: _state,
+        onRefresh: () => unawaited(_cast.startDiscovery()),
       );
       if (selected != null) {
         await _cast.connectToDevice(selected);

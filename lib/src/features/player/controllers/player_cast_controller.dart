@@ -20,8 +20,14 @@ class PlayerCastController {
     _eventSubscription = _bridge.dlnaEventStream.listen(_handleEvent);
   }
 
-  Future<void> startDiscovery() async {
-    await _bridge.dlnaStartDiscovery();
+  Future<bool> startDiscovery() async {
+    try {
+      await _bridge.dlnaStartDiscovery();
+      return true;
+    } catch (e) {
+      onShowMessage('投屏搜索失败: $e');
+      return false;
+    }
   }
 
   Future<void> stopDiscovery() async {
